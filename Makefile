@@ -80,3 +80,17 @@ k3s-benchmark: ## Прогнать бенчмарк по K8s/k3s Ingress (пор
 
 k3s-chaos: ## Запустить Chaos-тест в k3s (удаление пода Kubernetes под нагрузкой)
 	CHAOS_URL="http://localhost:8088/.well-known/openid-configuration" node scripts/tests/chaos-test.js
+
+k3s-dashboard: ## Запустить вебморду Kubernetes Dashboard (https://localhost:8443)
+	@echo "=========================================================="
+	@echo "🔑 Скопируй этот токен для входа в веб-панель:"
+	@echo ""
+	@kubectl get secret admin-user-token -n kubernetes-dashboard -o jsonpath='{.data.token}' | base64 -d
+	@echo ""
+	@echo ""
+	@echo "=========================================================="
+	@echo "🌐 Открывай в браузере: https://localhost:8443"
+	@echo "   (Если браузер ругнется на самоподписанный SSL — нажми 'Дополнительно' -> 'Перейти на сайт')"
+	@echo "   Выбери пункт 'Token', вставь скопированный ключ и нажми Sign In."
+	@echo "=========================================================="
+	@kubectl port-forward -n kubernetes-dashboard service/kubernetes-dashboard 8443:443
