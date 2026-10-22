@@ -1,0 +1,138 @@
+name: ${PROJECT_NAME:-sso_platform}
+
+services:
+  # ==========================================
+  # 1. PostgreSQL 18 (Database-per-Service)
+  # ==========================================
+  postgres:
+    image: postgres:18-alpine
+    container_name: sso_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secret_pass}
+      POSTGRES_MULTIPLE_DATABASES: ${POSTGRES_MULTIPLE_DATABASES:-identity_db,user_db,admin_db}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./scripts/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+    networks:
+      - sso_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # 2. Redis 8 (Sessions, RBAC Cache, Rate Limit)
+  # ==========================================
+  redis:
+    image: redis:8.8.3-alpine
+    container_name: sso_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret_pass}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sso_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secret_pass}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ==========================================
+  # 3. Redpanda (Fast C++ Kafka replacement)
+  # ==========================================
+  redpanda:
+    image: redpandadata/redpanda:v26.2.5
+    container_name: sso_redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr internal://redpanda:29092,external://localhost:${KAFKA_BROKER_PORT:-9092}
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=warn
+    ports:
+      - "${KAFKA_BROKER_PORT:-9092}:9092"
+      - "18081:18081" # Schema Registry
+      - "18082:18082" # HTTP Proxy
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - sso_network
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # 4. Redpanda Console (Web UI for Kafka)
+  # ==========================================
+  redpanda-console:
+    image: redpandadata/console:v3.13.0
+    container_name: sso_redpanda_console
+    restart: unless-stopped
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "${REDPANDA_CONSOLE_PORT:-8080}:8080"
+    networks:
+      - sso_network
+
+  # ==========================================
+  # 5. Mailpit (Local SMTP Server & Web Inbox)
+  # ==========================================
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    container_name: sso_mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025" # This is where the Go service sends emails via SMTP
+      - "${MAILPIT_UI_PORT:-8025}:8025"   # Here, we check our emails in the browser
+    networks:
+      - sso_network
+
+  # ==========================================
+  # 6. Jaeger (OpenTelemetry Distributed Tracing)
+  # ==========================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: sso_jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686" # Web UI for viewing traces
+      - "${OTLP_GRPC_PORT:-4317}:4317"   # Rust and Go send traces here via OTLP gRPC
+      - "${OTLP_HTTP_PORT:-4318}:4318"   # OTLP HTTP
+    networks:
+      - sso_network
+
+networks:
+  sso_network:
+    name: sso_platform_net
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  redpanda_data:
