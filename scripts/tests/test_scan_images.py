@@ -23,6 +23,7 @@ class ImageScanTests(unittest.TestCase):
             runtime.STATE = Path(directory)
             runtime.K3S = 'example/k3s@sha256:' + 'a' * 64
             runtime.PINS = {}
+            runtime.PATCHED_COMPONENTS = {}
 
             def run(args, **kwargs):
                 calls.append(args)

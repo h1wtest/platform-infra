@@ -31,6 +31,7 @@ OPERATOR_URL = 'https://github.com/cloudnative-pg/cloudnative-pg/releases/downlo
 OPERATOR_SHA256 = '37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb'
 PINS = {
     'postgres': 'ghcr.io/cloudnative-pg/postgresql:18.6-standard-trixie@sha256:d72ace96f5803b12c341bb5dac48532e8c1f92f69e8a717a59d779bfc038dea9',
+    'cnpg-operator': 'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07',
     'redpanda': 'docker.io/redpandadata/redpanda:v26.2.5@sha256:badca2d958f81da675c3055a9ecb6ebb590325582bcf16936148ffd65e96e920',
     'mailpit': 'docker.io/axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498',
     'gateway': 'docker.io/nginxinc/nginx-unprivileged:1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03',
@@ -39,6 +40,9 @@ PINS = {
     'tempo': 'docker.io/grafana/tempo:3.1.1@sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044',
     'otel-collector': 'docker.io/otel/opentelemetry-collector-contrib:0.163.2@sha256:7f22d2a6748110ffb6a59bc0df448bccbf501cdb667d610ede4c61d3863d5849',
 }
+
+# Only these selected runtimes have organization-owned security extension recipes.
+PATCHED_COMPONENTS = {'gateway': 'nginx', 'grafana': 'grafana', 'tempo': 'tempo', 'cnpg-operator': 'cnpg-operator'}
 
 
 def run(args, *, input=None, capture=True, timeout=600, check=True):
@@ -126,7 +130,7 @@ def create_secrets(state):
 def workspace_hash(workspace=WORKSPACE):
     digest = hashlib.sha256()
     ignored = {'.git', '.local', 'target', 'node_modules', 'dist', '.venv', '__pycache__', 'docs', '.svelte-kit'}
-    for directory in ('identity-service', 'user-notification-service', 'frontend', 'platform-contracts', 'platform-infra/components/nginx'):
+    for directory in ('identity-service', 'user-notification-service', 'frontend', 'platform-contracts', 'platform-infra/components'):
         for base, dirs, files in os.walk(workspace / directory):
             dirs[:] = sorted(d for d in dirs if d not in ignored)
             for name in sorted(files):
@@ -144,21 +148,47 @@ def workspace_hash(workspace=WORKSPACE):
     return digest.hexdigest()
 
 
-def build_gateway():
-    """Build the patched gateway from the recorded registry base, without publishing."""
-    recipe = hashlib.sha256((ROOT / 'components/nginx/Dockerfile').read_bytes()).hexdigest()
-    staging = 'sso-remediation/gateway:build-' + uuid.uuid4().hex
-    run(['docker', 'build', '--pull', '--build-arg', 'GATEWAY_BASE=' + PINS['gateway'], '-t', staging, ROOT / 'components/nginx'], timeout=900)
+def component_recipe_hash(name):
+    directory = ROOT / 'components' / PATCHED_COMPONENTS[name]
+    digest = hashlib.sha256()
+    for path in sorted(directory.rglob('*')):
+        if path.is_symlink():
+            raise RuntimeError('Build input symlinks are not supported')
+        if path.is_file():
+            relative = path.relative_to(directory).as_posix().encode()
+            content = path.read_bytes()
+            digest.update(len(relative).to_bytes(8, 'big'))
+            digest.update(relative)
+            digest.update(len(content).to_bytes(8, 'big'))
+            digest.update(content)
+    return digest.hexdigest()
+
+
+def build_component(name):
+    """Build a genuine patched runtime with content and input provenance."""
+    recipe = component_recipe_hash(name)
+    staging = f'sso-remediation/{name}:build-' + uuid.uuid4().hex
+    command = ['docker', 'build', '--pull', '-t', staging]
+    if name == 'gateway':
+        command += ['--build-arg', 'GATEWAY_BASE=' + PINS[name]]
+    elif name == 'tempo':
+        command += ['--build-arg', 'TEMPO_BASE=' + PINS[name]]
+    elif name == 'grafana':
+        command += ['--build-arg', 'GRAFANA_BASE=' + PINS[name]]
+    elif name == 'cnpg-operator':
+        command += ['--build-arg', 'CNPG_OPERATOR_BASE=' + PINS[name]]
+    command += [ROOT / 'components' / PATCHED_COMPONENTS[name]]
+    run(command, timeout=2400)
     info = json.loads(run(['docker', 'image', 'inspect', staging]).stdout)[0]
     image_id = info['Id']
     if not image_id.startswith('sha256:') or len(image_id) != 71 or any(c not in '0123456789abcdef' for c in image_id[7:]):
-        raise RuntimeError('Gateway build returned an invalid image identity')
-    tag = 'sso-remediation/gateway:sha256-' + image_id.split(':', 1)[1]
+        raise RuntimeError(f'Build returned an invalid image identity: {name}')
+    tag = f'sso-remediation/{name}:sha256-' + image_id.split(':', 1)[1]
     run(['docker', 'tag', staging, tag])
     run(['docker', 'image', 'rm', staging])
-    if hashlib.sha256((ROOT / 'components/nginx/Dockerfile').read_bytes()).hexdigest() != recipe:
-        raise RuntimeError('Gateway recipe changed during image build')
-    return {'gateway': tag, 'gateway_id': image_id, 'gateway_base': PINS['gateway'], 'gateway_recipe_sha256': recipe}
+    if component_recipe_hash(name) != recipe:
+        raise RuntimeError(f'Build inputs changed during image compilation: {name}')
+    return {name: tag, name + '_id': image_id, name + '_base': PINS[name], name + '_recipe_sha256': recipe}
 
 
 def verify_local_image(name, image, image_id):
@@ -186,7 +216,8 @@ def build_images():
         # CNPG inspects the PostgreSQL major in the tag for upgrade safety; retain tag plus digest.
         images[name] = tag
     source = workspace_hash()
-    images.update(build_gateway())
+    for name in PATCHED_COMPONENTS:
+        images.update(build_component(name))
     for name, repo in [('identity', 'identity-service'), ('profile', 'user-notification-service'), ('notification', 'user-notification-service'), ('worker', 'user-notification-service'), ('admin', 'user-notification-service'), ('frontend', 'frontend')]:
         staging = f'sso-remediation/{name}:build-' + uuid.uuid4().hex
         command = ['docker', 'build', '--pull', '-f', str(WORKSPACE / repo / 'Dockerfile'), '-t', staging]
@@ -218,17 +249,18 @@ def load_images(state=STATE):
     if not path.is_file():
         raise RuntimeError('No immutable image lock. Run make build first.')
     images = json.loads(path.read_text())
+    if images.get('k3s') != K3S:
+        raise RuntimeError('K3s image pin changed; run make build')
     for key in PINS:
-        if key == 'gateway':
-            image_id = images.get('gateway_id', '')
-            recipe = hashlib.sha256((ROOT / 'components/nginx/Dockerfile').read_bytes()).hexdigest()
-            if images.get('gateway_base') != PINS['gateway'] or images.get('gateway_recipe_sha256') != recipe:
-                raise RuntimeError('Gateway build inputs changed; run make build')
-            if not image_id.startswith('sha256:') or len(image_id) != 71 or any(c not in '0123456789abcdef' for c in image_id[7:]) or images.get(key) != 'sso-remediation/gateway:sha256-' + image_id.removeprefix('sha256:'):
-                raise RuntimeError('Gateway requires a content-addressed patched image lock; run make build')
+        if key in PATCHED_COMPONENTS:
+            image_id = images.get(key + '_id', '')
+            if images.get(key + '_base') != PINS[key] or images.get(key + '_recipe_sha256') != component_recipe_hash(key):
+                raise RuntimeError(f'Patched component build inputs changed; run make build: {key}')
+            if not image_id.startswith('sha256:') or len(image_id) != 71 or any(c not in '0123456789abcdef' for c in image_id[7:]) or images.get(key) != f'sso-remediation/{key}:sha256-' + image_id.removeprefix('sha256:'):
+                raise RuntimeError(f'Component requires a content-addressed patched image lock; run make build: {key}')
             continue
-        if '@sha256:' not in images.get(key, ''):
-            raise RuntimeError(f'Unpinned infrastructure image: {key}')
+        if images.get(key) != PINS[key]:
+            raise RuntimeError(f'Infrastructure image pin changed; run make build: {key}')
     return images
 
 
@@ -258,12 +290,9 @@ def start_cluster(timeout='180s', k3d='k3d'):
     guard(sys.modules[__name__])
 
 def install_operator(images):
-    content = (STATE / 'cnpg-operator.yaml').read_bytes()
-    if hashlib.sha256(content).hexdigest() != images['operator_sha256']:
-        raise RuntimeError('Operator manifest differs from immutable lock')
-    # The release manifest contains the CNPG controller RBAC/webhook; applications never receive API credentials.
-    run(['kubectl', '--context', CONTEXT, 'apply', '--server-side', '-f', STATE / 'cnpg-operator.yaml'])
-    run(['kubectl', '--context', CONTEXT, '-n', 'cnpg-system', 'rollout', 'status', 'deployment/cnpg-controller-manager', '--timeout=180s'])
+    from cnpg_operator import install
+    verify_local_image('cnpg-operator', images['cnpg-operator'], images['cnpg-operator_id'])
+    install(sys.modules[__name__], images)
 
 
 
@@ -343,7 +372,7 @@ def up():
     if images['source_sha256'] != workspace_hash():
         raise RuntimeError('Build inputs changed since image lock; run make build')
     cluster()
-    for name in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend', 'gateway'):
+    for name in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend', *PATCHED_COMPONENTS):
         verify_local_image(name, images[name], images[name + '_id'])
         run(['k3d', 'image', 'import', images[name], '-c', CLUSTER], timeout=600)
     install_operator(images)

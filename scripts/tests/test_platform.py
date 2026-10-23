@@ -46,9 +46,10 @@ class BootstrapBehavior(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = pathlib.Path(directory)
             image_id = 'sha256:' + 'a' * 64
-            images = {**platform.PINS, 'gateway': 'sso-remediation/gateway:sha256-' + 'a' * 64, 'gateway_id': image_id,
-                      'gateway_base': platform.PINS['gateway'],
-                      'gateway_recipe_sha256': hashlib.sha256((ROOT / 'components/nginx/Dockerfile').read_bytes()).hexdigest()}
+            images = {'k3s': platform.K3S, **platform.PINS}
+            for name in platform.PATCHED_COMPONENTS:
+                images.update({name: f'sso-remediation/{name}:sha256-' + 'a' * 64, name + '_id': image_id,
+                               name + '_base': platform.PINS[name], name + '_recipe_sha256': platform.component_recipe_hash(name)})
             lock = state / 'images.lock.json'
             lock.write_text(json.dumps(images))
             self.assertEqual(platform.load_images(state)['gateway_id'], image_id)
@@ -56,6 +57,37 @@ class BootstrapBehavior(unittest.TestCase):
                 images['gateway'] = invalid
                 lock.write_text(json.dumps(images))
                 with self.subTest(image=invalid), self.assertRaises(RuntimeError):
+                    platform.load_images(state)
+
+    def test_grafana_lock_rejects_unpatched_base_and_stale_recipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            images = {'k3s': platform.K3S, **platform.PINS}
+            for name in platform.PATCHED_COMPONENTS:
+                images.update({name: f'sso-remediation/{name}:sha256-' + 'b' * 64, name + '_id': 'sha256:' + 'b' * 64,
+                               name + '_base': platform.PINS[name], name + '_recipe_sha256': platform.component_recipe_hash(name)})
+            lock = state / 'images.lock.json'
+            lock.write_text(json.dumps(images))
+            self.assertEqual(platform.load_images(state)['grafana_id'], images['grafana_id'])
+            for updates in ({'grafana': platform.PINS['grafana']},
+                            {'grafana': 'sso-remediation/grafana:sha256-' + 'c' * 64},
+                            {'grafana_recipe_sha256': '0' * 64}):
+                lock.write_text(json.dumps({**images, **updates}))
+                with self.subTest(updates=updates), self.assertRaises(RuntimeError):
+                    platform.load_images(state)
+
+    def test_changed_registry_and_k3s_pins_reject_previous_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            images = {'k3s': platform.K3S, **platform.PINS}
+            for name in platform.PATCHED_COMPONENTS:
+                images.update({name: f'sso-remediation/{name}:sha256-' + 'a' * 64, name + '_id': 'sha256:' + 'a' * 64,
+                               name + '_base': platform.PINS[name], name + '_recipe_sha256': platform.component_recipe_hash(name)})
+            lock = state / 'images.lock.json'
+            for name in ('k3s', *(name for name in platform.PINS if name not in platform.PATCHED_COMPONENTS)):
+                changed = {**images, name: images[name].rsplit('@', 1)[0] + '@sha256:' + 'f' * 64}
+                lock.write_text(json.dumps(changed))
+                with self.subTest(image=name), self.assertRaises(RuntimeError):
                     platform.load_images(state)
 
 

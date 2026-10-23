@@ -17,6 +17,8 @@ All six repositories already existed; no new empty repository or fictitious depl
 
 Local UI: `https://localhost:8448`. Verify using `.local/ca.crt` explicitly. The OS trust store was not modified. Administrator credentials, signing material and service keys remain in ignored private `.local`; real MFA is required. Never paste them into Git, tickets or logs.
 
+Current acceptance scope is local development only. The user explicitly excluded whole-host automatic recovery and external-hosting requirements from current completion criteria. Historical failed host reports below remain evidence, not current acceptance blockers; no new host faults or cloud work are authorized.
+
 ## Executed application and remote checks
 
 Permanent actual acceptance harness: `scripts/acceptance`; detailed commands and observations: `docs/acceptance.md`.
@@ -50,7 +52,11 @@ Evidence remains private in `.local/acceptance`: both failed host reports, corre
 
 **The entire platform is not all-findings-clean or production-ready.** `docs/security-images.md` retains exact infrastructure findings and primary advisories. The gateway is genuinely patched and scanned with70 packages/zero findings; no severity filters, CVE ignores or inventory deletion are used in final image gates.
 
-Supported PostgreSQL/Redpanda/K3s images retain genuine unresolved findings. The optional Grafana backend/CA rebuild fixes its patchable issues but retains a module-level advisory for an OpenPGP package absent from the compiled graph; literal Trivy all-findings acceptance is still not claimed. Package-aware govulncheck evidence is not a local suppression. Official CNPG operator cluster privileges also require explicit treatment; scanning only application resources does not certify operator RBAC.
+Supported PostgreSQL/Redpanda/K3s images retain unresolved findings. Grafana, Tempo and CNPG now use genuine security extensions integrated into content-addressed build/import/scan paths. The previously unscanned CNPG image's39 findings were fixed by rebuilding both shipped manager architectures with Go1.27.3/x/net0.60 and genuine Debian CA metadata. The final image including its separate readiness helper evaluates193packages with zero findings. Grafana/Tempo retain raw findings with separately recorded applicability evidence; no suppression or all-clean claim.
+
+CNPG permissions are now actually bounded: the retained original ClusterRole has only node/catalog reads and named own-webhook access; operand mutation uses a Role in sso-remediation. Real impersonated authorization permits owned secrets/exec/services and denies all three in kube-system/default. Operator namespace PKI/cache/leader permissions remain necessary. A peer review found and corrected local pull policy and webhook-secret renewal gaps. Live operator and all three injected instance managers use the patched image; original PVCs retained, all three PostgreSQL instances Ready. Repeat installation and encrypted four-database backup/disposable content-matching restore passed.
+
+Grafana now ships complete signed, checksum-pinned Prometheus/Tempo plugins and disables startup downloads/updates. Actual retained-data dashboard plots and both datasource health checks passed; a fresh disposable emptyDir instance also queried real Prometheus samples and Tempo successfully without plugin downloads. Tempo's real cross-service trace was observed after its package patch. Telegram bot token is absent in stored settings, environment and runtime Secret; real delivery remains a credential prerequisite.
 
 Infrastructure remote CI actually ran: the first source-IaC failure was corrected by explicitly retaining Grafana UID472; the subsequent run reached immutable image scanning and failed on remaining real findings. Do not merge by weakening this gate. Existing Kubernetes nodes1.35.5 were not implicitly upgraded; configured bootstrap1.35.9 does not prove runtime maintenance or zero vulnerabilities.
 

@@ -38,5 +38,18 @@ class PortableSourceIdentity(unittest.TestCase):
             recipe.write_text('FROM pinned-base\nRUN install-fixed-packages\n')
             self.assertNotEqual(before, workspace_hash(workspace))
 
+    def test_grafana_dependency_and_probe_changes_invalidate_source_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = pathlib.Path(directory)
+            component = workspace / 'platform-infra/components/grafana'
+            component.mkdir(parents=True)
+            for filename in ('Dockerfile', 'go.sum', 'healthcheck.go'):
+                with self.subTest(input=filename):
+                    path = component / filename
+                    path.write_text('original\n')
+                    before = workspace_hash(workspace)
+                    path.write_text('changed\n')
+                    self.assertNotEqual(before, workspace_hash(workspace))
+
 
 if __name__ == '__main__': unittest.main()
