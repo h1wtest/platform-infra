@@ -43,3 +43,4 @@ COPY --from=backend /out/grafana-version /.grafana-version
 COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=certificates /package-control/control /var/lib/dpkg/status.d/ca-certificates
 COPY --from=certificates /package-control/md5sums /var/lib/dpkg/status.d/ca-certificates.md5sums
+USER 472
