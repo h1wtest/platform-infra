@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Verify actual SASL/TLS broker rejects forbidden service permissions."""
-import json
+import sys
 from pathlib import Path
 import subprocess
 
 from common import ROOT, STATE
+sys.path.insert(0, str(ROOT / 'scripts'))
+import env_secrets
 root=ROOT
-values=json.loads((ROOT/'.local/secrets.json').read_text())
+values=env_secrets.load(ROOT/'.local')
 base=['kubectl','--context','k3d-sso-remediation','-n','sso-remediation','exec','redpanda-0','--','rpk','-X','brokers=localhost:29092']
 
 def invoke(role,*arguments):

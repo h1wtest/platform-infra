@@ -40,10 +40,10 @@
 
 ## Task 3: Telegram prerequisites
 
-**Files:** private .local/secrets.json and runtime configuration read programmatically; existing user-notification-service Telegram handlers and acceptance tools only as needed.
+**Files:** active workspace `/home/bpqvg/dev/h1wtest-remediation`, canonical private `user-notification-service/.env` and runtime configuration read programmatically; existing Telegram handlers and acceptance tools only as needed. Earlier checks of `.local/secrets.json` are historical; it is no longer active configuration.
 
 - [x] Inspected stored/environment/runtime token presence without exposing identifiers or credentials.
-- [ ] Real Bot API identity/link/delivery acceptance blocked: token absent in all three sources; no destination invented.
+- [x] Owner subsequently supplied the real bot token; genuine private-chat Start/webhook linking, persisted preferences and exact-login-event Kafka/worker Telegram delivery passed. Sent job recorded one attempt; no synthetic webhook/direct test message substituted. Evidence in docs/acceptance.md and private .local/acceptance/telegram.json.
 - [x] Recorded prerequisite without mocks and continued all reachable work.
 
 ## Task 4: Integrated verification and release

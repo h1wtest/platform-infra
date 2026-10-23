@@ -7,11 +7,18 @@ import secrets
 import time
 import uuid
 import manifests
+import env_secrets
 
 
 def execute(runtime, unused=False):
-    path = runtime.STATE / 'secrets.json'
-    values = json.loads(path.read_text())
+    legacy = runtime.STATE / 'secrets.json'
+    legacy_unused = unused and legacy.is_file() and not (runtime.STATE / env_secrets.MARKER).exists()
+    if legacy_unused:
+        values = env_secrets.read_legacy(runtime.STATE)
+    else:
+        if legacy.is_file():
+            env_secrets.migrate(runtime.STATE)
+        values = env_secrets.load(runtime.STATE)
     if 'encryption_key' not in values:
         raise RuntimeError('No legacy shared key; rekey is not required')
     context = runtime.run(['kubectl', 'config', 'get-contexts', '-o', 'name']).stdout.decode().splitlines()
@@ -26,10 +33,39 @@ def execute(runtime, unused=False):
             clusters = json.loads(runtime.run(['k3d', 'cluster', 'list', '-o', 'json']).stdout)
             if any(cluster['name'] == runtime.CLUSTER for cluster in clusters):
                 raise RuntimeError('Cluster exists without expected context; cannot prove empty bootstrap')
+        if legacy_unused:
+            # Only proven unused historical bootstrap may create material that never existed.
+            generated = {*env_secrets.PURPOSE_KEYS, 'gateway_token',
+                         *(key for key in env_secrets.REQUIRED_KEYS if key.startswith('kafka_'))}
+            for key in env_secrets.REQUIRED_KEYS:
+                if key not in generated and not values.get(key):
+                    raise RuntimeError('Missing original legacy credential: ' + key.upper())
+            for relative in ('ca.key', 'ca.crt', 'tls.key', 'tls.crt', 'signing.pem', 'backup.key'):
+                if not (runtime.STATE / relative).is_file() or not (runtime.STATE / relative).read_bytes():
+                    raise RuntimeError('Missing original legacy private/certificate material: ' + relative)
+            from security_material import SERVICES, ensure
+            for service in SERVICES:
+                directory = runtime.STATE / 'certificates' / service
+                if (directory / 'tls.key').exists() and not (directory / 'tls.crt').exists():
+                    raise RuntimeError('Incomplete historical service identity; restore matching certificate before retry')
+            completed = dict(values)
+            completed.pop('encryption_key')
+            if 'gateway_token' not in completed:
+                completed['gateway_token'] = secrets.token_urlsafe(32)
+            ensure(runtime.STATE, completed, runtime.run, initialize=True)
+            completed['encryption_key'] = values['encryption_key']
+            # Keep the full legacy source until verified owner-env import commits.
+            from private_files import atomic_json
+            atomic_json(legacy, completed)
+            env_secrets.migrate(runtime.STATE)
+            values = env_secrets.load(runtime.STATE)
         archived = runtime.STATE / ('unused-legacy-key-' + uuid.uuid4().hex + '.json')
-        from private_files import atomic_json, preserve_key_manifest
+        from private_files import preserve_key_manifest
+        for key in env_secrets.PURPOSE_KEYS:
+            if key not in values:
+                values[key] = base64.b64encode(secrets.token_bytes(32)).decode()
         preserve_key_manifest(runtime.STATE, values, name=archived.name)
-        values.pop('encryption_key'); atomic_json(path, values)
+        values.pop('encryption_key'); env_secrets.save(runtime.STATE, values)
         runtime.create_secrets(runtime.STATE)
         print('Explicitly unused legacy key archived after proving no namespace or retained data; purpose keys retained/generated.')
         return
@@ -74,9 +110,9 @@ def execute(runtime, unused=False):
     runtime.backup()
     for key in ('mfa_encryption_key', 'delivery_encryption_key', 'profile_quarantine_key', 'notification_quarantine_key', 'admin_quarantine_key'):
         if key not in values: values[key] = base64.b64encode(secrets.token_bytes(32)).decode()
-    from private_files import atomic_json, preserve_key_manifest
+    from private_files import preserve_key_manifest
     preserve_key_manifest(runtime.STATE, values, name='rekey-precommit-' + uuid.uuid4().hex + '.json')
-    atomic_json(path, values)
+    env_secrets.save(runtime.STATE, values)
     # Keep legacy material on disk and runtime stopped on any failure; each owner transaction is idempotent.
     runtime.apply([manifests.secret('rekey-material', values)])
     images = runtime.load_images()
@@ -97,6 +133,11 @@ def execute(runtime, unused=False):
         runtime.kube('wait', '--for=condition=complete', 'job/' + job, '--timeout=330s')
     archive = runtime.STATE / ('rekey-complete-' + uuid.uuid4().hex + '.json')
     preserve_key_manifest(runtime.STATE, values, name=archive.name)
-    values.pop('encryption_key'); atomic_json(path, values)
+    final_values = dict(values)
+    final_values.pop('encryption_key')
+    # Writers remain stopped. Publish only after every owner committed, retaining
+    # legacy + targets in env/archive until publication succeeds for safe retry.
+    runtime.apply([manifests.secret('platform-secrets', final_values)])
+    env_secrets.save(runtime.STATE, final_values)
     runtime.kube('delete', 'secret', 'rekey-material')
     print('All owner ciphertext rekeys committed. Runtime remains stopped; run make up to migrate/apply purpose-separated configuration and resume.')

@@ -1,10 +1,20 @@
 """Local k3d resources. Stateful controllers retain PVCs; no teardown deletes data."""
 import base64
+import hashlib
 import json
+from urllib.parse import quote
+import env_secrets
 
 NS = 'sso-remediation'
 APPS = {'identity-service': ('identity', 8001, 'identity'), 'profile-service': ('profile', 8002, 'profile'), 'notification-service': ('notification', 8003, 'notification'), 'notification-worker': ('worker', 8005, 'notification'), 'admin-audit-service': ('admin', 8004, 'audit')}
 DBS = ('identity', 'profile', 'notification', 'audit')
+
+
+def database_url(username, password, database):
+    """Keep literal credentials inside URI components and require verified TLS."""
+    return (f'postgresql://{quote(username, safe="")}:{quote(password, safe="")}'
+            f'@postgres-rw.sso-remediation.svc:5432/{quote(database, safe="")}'
+            '?sslmode=verify-full&sslrootcert=/run/postgres/ca.crt')
 
 
 def resource(kind, name, spec=None, **fields):
@@ -45,7 +55,7 @@ def deployment(name, spec, replicas=1):
 
 
 def infrastructure(images, state, config_dir):
-    s = json.loads((state / 'secrets.json').read_text())
+    s = env_secrets.load(state)
     yield {'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': NS, 'labels': {'pod-security.kubernetes.io/enforce': 'restricted', 'pod-security.kubernetes.io/enforce-version': 'v1.33'}}}
     from security_material import SERVICES, broker_cluster_config, broker_config
     for service_name in SERVICES:
@@ -59,7 +69,10 @@ def infrastructure(images, state, config_dir):
     yield secret('platform-secrets', s)
     yield secret('gateway-identity', {'trusted-headers.conf': 'map $proxy_host $gateway_identity_token { default ""; "identity-service:8001" "' + s['gateway_token'] + '"; }\nproxy_set_header X-Gateway-Token $gateway_identity_token;\n'})
     for db in DBS:
-        yield secret(f'{db}-database', {'DATABASE_URL': f"postgresql://{db}_runtime:{s[db + '_runtime_password']}@postgres-rw.sso-remediation.svc:5432/{db}_db?sslmode=verify-full&sslrootcert=/run/postgres/ca.crt", 'MIGRATION_DATABASE_URL': f"postgresql://{db}_migration:{s[db + '_migration_password']}@postgres-rw.sso-remediation.svc:5432/{db}_db?sslmode=verify-full&sslrootcert=/run/postgres/ca.crt"})
+        yield secret(f'{db}-database', {
+            'DATABASE_URL': database_url(db + '_runtime', s[db + '_runtime_password'], db + '_db'),
+            'MIGRATION_DATABASE_URL': database_url(db + '_migration', s[db + '_migration_password'], db + '_db'),
+        })
     # CNPG performs synchronous streaming replication, fencing and automatic primary failover.
     yield resource('Cluster', 'postgres', {'instances': 3, 'imageName': images['postgres'], 'smartShutdownTimeout': 30, 'stopDelay': 60, 'enableSuperuserAccess': True, 'superuserSecret': {'name': 'database-superuser'}, 'storage': {'size': '4Gi', 'storageClass': 'local-path'}, 'walStorage': {'size': '2Gi', 'storageClass': 'local-path'}, 'postgresql': {'parameters': {'max_connections': '200', 'synchronous_commit': 'on'}, 'synchronous': {'method': 'any', 'number': 1, 'dataDurability': 'required'}}, 'affinity': {'enablePodAntiAffinity': True, 'topologyKey': 'kubernetes.io/hostname', 'podAntiAffinityType': 'preferred'}, 'resources': {'requests': {'cpu': '200m', 'memory': '256Mi'}, 'limits': {'cpu': '2', 'memory': '1Gi'}}, 'monitoring': {'enablePodMonitor': False}, 'bootstrap': {'initdb': {'database': 'platform', 'owner': 'platform_owner'}}})
     names = ['redpanda', 'mailpit', 'gateway', 'frontend', 'prometheus', 'grafana', 'tempo', 'otel-collector', *APPS]
@@ -97,7 +110,20 @@ def infrastructure(images, state, config_dir):
     yield from network_policies()
 
 
-def applications(images):
+def credential_revision(state):
+    """Restart credential consumers on owner env edits without exposing values."""
+    values = env_secrets.load(state)
+    return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def credential_deployment(name, spec, revision, replicas=1):
+    result = deployment(name, spec, replicas)
+    result['spec']['template']['metadata']['annotations'] = {'sso.local/credential-revision': revision}
+    return result
+
+
+def applications(images, state):
+    revision = credential_revision(state)
     for name, (target, port, db) in APPS.items():
         role = 'notification' if target == 'worker' else target
         env = {'DATABASE_URL': (f'{db}-database', 'DATABASE_URL'), 'HTTP_PORT': port, 'PUBLIC_ORIGIN': 'https://localhost:8448', 'OAUTH_ISSUER': 'https://localhost:8448', 'TLS_CERT_FILE': '/run/tls/tls.crt', 'TLS_KEY_FILE': '/run/tls/tls.key', 'INTERNAL_CA_FILE': '/run/tls/ca.crt', 'KAFKA_BROKERS': ','.join(f'redpanda-{i}.redpanda:29092' for i in range(3)), 'KAFKA_TLS_CA_FILE': '/run/tls/ca.crt', 'KAFKA_SASL_USERNAME': role, 'KAFKA_SASL_PASSWORD': ('platform-secrets', 'kafka_' + role + '_password'), 'OTEL_EXPORTER_OTLP_ENDPOINT': 'http://otel-collector:4318', 'OTEL_SERVICE_NAME': name, 'IDENTITY_URL': 'https://identity-service:8001', 'PROFILE_URL': 'https://profile-service:8002', 'NOTIFICATION_URL': 'https://notification-service:8003', 'INTERNAL_SERVICE_TOKEN': ('platform-secrets', role + '_token'), 'SMTP_HOST': 'mailpit', 'SMTP_PORT': '1025', 'SMTP_FROM': 'no-reply@sso.local', 'SMTP_ALLOW_INSECURE': 'true', 'LOG_LEVEL': 'info', 'RUST_LOG': 'info'}
@@ -126,7 +152,7 @@ def applications(images):
         application = pod(name, images[target], (port,), env, volumes=volumes, mounts=mounts)
         from database_gate import attach
         attach(application, images)
-        yield deployment(name, application, replicas=2 if target != 'worker' else 1)
+        yield credential_deployment(name, application, revision, replicas=2 if target != 'worker' else 1)
         yield service(name, [(port, port)])
         if target in ('identity', 'profile', 'notification', 'admin'):
             yield resource('HorizontalPodAutoscaler', name, {'scaleTargetRef': {'apiVersion': 'apps/v1', 'kind': 'Deployment', 'name': name}, 'minReplicas': 2, 'maxReplicas': 4, 'metrics': [{'type': 'Resource', 'resource': {'name': 'cpu', 'target': {'type': 'Utilization', 'averageUtilization': 70}}}], 'behavior': {'scaleDown': {'stabilizationWindowSeconds': 120}}})
@@ -138,7 +164,7 @@ def applications(images):
     gateway['volumes'].append({'name': 'trusted-headers', 'secret': {'secretName': 'gateway-identity', 'defaultMode': 0o440}})
     gateway['containers'][0]['volumeMounts'].append({'name': 'trusted-headers', 'mountPath': '/run/gateway', 'readOnly': True})
     gateway['containers'][0]['command'] = ['nginx', '-g', 'daemon off;']
-    yield deployment('gateway', gateway, 2)
+    yield credential_deployment('gateway', gateway, revision, 2)
     yield service('gateway', [(443, 8443), (80, 8080)])
 
 
@@ -172,7 +198,8 @@ def network_policies():
         yield allow(name, [{'from': [{**local, 'podSelector': {}}]}], [{'to': [{**local, 'podSelector': {}}]}])
 
 
-def monitoring(images):
+def monitoring(images, state):
+    revision = credential_revision(state)
     specs = [('prometheus', 9090, ['/bin/prometheus', '--config.file=/etc/platform/prometheus.yml', '--storage.tsdb.path=/data', '--storage.tsdb.retention.time=7d'], [('prometheus.yml', '/etc/platform/prometheus.yml'), ('alerts.yml', '/etc/platform/alerts.yml')], 65534, '/-/ready'), ('tempo', 3200, ['/tempo', '-config.file=/etc/platform/tempo.yml'], [('tempo.yml', '/etc/platform/tempo.yml')], 10001, '/ready'), ('otel-collector', 4318, ['/otelcol-contrib', '--config=/etc/platform/otel.yml'], [('otel.yml', '/etc/platform/otel.yml')], 10001, None), ('grafana', 3000, None, [('grafana-datasources.yml', '/etc/grafana/provisioning/datasources/platform.yml'), ('grafana-dashboards.yml', '/etc/grafana/provisioning/dashboards/platform.yml'), ('platform-dashboard.json', '/var/lib/grafana/dashboards/platform.json')], 472, '/api/health')]
     for name, port, command, configs, uid, ready in specs:
         volumes = [{'name': f'config-{i}', 'configMap': {'name': file.replace('.', '-')}} for i, (file, _) in enumerate(configs)]
@@ -198,7 +225,7 @@ def monitoring(images):
             obj['containers'][0]['command'] = command
         if ready:
             obj['containers'][0]['livenessProbe']['httpGet']['path'] = ready
-        deploy = deployment(name, obj); deploy['spec']['strategy'] = {'type': 'Recreate'}
+        deploy = credential_deployment(name, obj, revision); deploy['spec']['strategy'] = {'type': 'Recreate'}
         yield deploy
         ports = [(port, port)] + ([(4317, 4317)] if name == 'tempo' else [])
         yield service(name, ports)

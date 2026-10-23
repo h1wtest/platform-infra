@@ -2,6 +2,7 @@
 
 ## 2026-10-23 — isolated platform remediation
 
+- Moved canonical credentials and private keys into ignored owner repository `.env` files; runtime/schema/acceptance consumers read the owner store and explicit rekey saves there while preserving protected historical recovery archives. Legacy import validates exact credentials/private bytes without rotation or a persistent secrets.json cache. Telegram configuration belongs to the Go repository; frontend/build contexts/source exports receive no secrets.
 - Removed image/dependency vulnerability scanners and their CI gates throughout the ecosystem by explicit owner instruction. Deleted scanner-only archive helpers/tests; preserved genuine package/module fixes, content-addressed builds, secrets/IaC/schema checks, TLS/RBAC and behavioral acceptance. Historical reports are no longer release criteria; removal is not a clean-security claim.
 - Narrowed the authenticated CNPG operator's operand permissions to the application namespace, preserving only required cluster reads and named webhook updates. Verified real cross-namespace denial, existing-instance reconciliation, and encrypted four-database backup/disposable restore. No broad RBAC fallback or deleted PVCs.
 - Added missing CNPG image scan coverage and genuine source/security rebuild of both shipped instance-manager architectures; fixed all39 observed operator findings with supported Go/module/CA updates and truthful provenance.

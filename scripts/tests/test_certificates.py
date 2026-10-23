@@ -12,7 +12,9 @@ from certificate_repair import repair
 class StrictCertificateBehavior(unittest.TestCase):
     def test_strict_ca_and_leaf_generation_preserves_private_key_on_repair(self):
         with tempfile.TemporaryDirectory() as directory:
-            state = pathlib.Path(directory)
+            state = pathlib.Path(directory) / 'platform-infra' / '.local'
+            for owner in ('identity-service', 'user-notification-service'):
+                (pathlib.Path(directory) / owner).mkdir()
             cli.create_secrets(state)
             leaf = state / 'certificates/gateway/tls.crt'
             private = (state / 'ca.key').read_bytes()

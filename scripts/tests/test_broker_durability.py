@@ -14,15 +14,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cli
 import manifests
 import security_material
+import env_secrets
 
 
 def broker_resources(directory):
-    state = Path(directory)
-    values = {'kafka_bootstrap_password': 'test-bootstrap-password', 'postgres_password': 'test-postgres-password', 'gateway_token': 'test-gateway-token'}
+    state = Path(directory) / 'platform-infra' / '.local'
+    state.mkdir(parents=True)
+    for owner in ('identity-service', 'user-notification-service'):
+        (Path(directory) / owner).mkdir()
+    values = {key: 'test-' + key for key in env_secrets.REQUIRED_KEYS}
+    values.update(kafka_bootstrap_password='test-bootstrap-password', postgres_password='test-postgres-password', gateway_token='test-gateway-token')
     for database in manifests.DBS:
         values[database + '_runtime_password'] = 'test-runtime-password'
         values[database + '_migration_password'] = 'test-migration-password'
-    (state / 'secrets.json').write_text(json.dumps(values))
+    env_secrets.save(state, values)
     (state / 'ca.crt').write_text('test certificate fixture')
     (state / 'signing.pem').write_text('test signing fixture')
     for name in security_material.SERVICES:
@@ -36,6 +41,36 @@ def broker_resources(directory):
         if item['kind'] == 'StatefulSet' and item['metadata']['name'] == 'redpanda':
             return resources
     raise AssertionError('Broker StatefulSet not rendered')
+
+
+class OwnerEnvRollout(unittest.TestCase):
+    def test_telegram_edit_changes_consumer_templates_without_frontend_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / 'platform-infra' / '.local'
+            state.mkdir(parents=True)
+            for owner in ('identity-service', 'user-notification-service'):
+                (Path(directory) / owner).mkdir()
+            values = {key: 'test-' + key for key in env_secrets.REQUIRED_KEYS}
+            values['telegram_bot_token'] = 'test-initial-token'
+            env_secrets.save(state, values)
+            images = {**cli.PINS, **{target: 'test/' + target for target in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend')}}
+            def templates():
+                objects = [*manifests.applications(images, state), *manifests.monitoring(images, state)]
+                return {item['metadata']['name']: item['spec']['template'] for item in objects if item['kind'] == 'Deployment'}
+            first = templates()
+            self.assertEqual(first, templates())
+            owner_env = state.parent.parent / 'user-notification-service' / '.env'
+            contents = owner_env.read_text()
+            self.assertIn('test-initial-token', contents)
+            owner_env.write_text(contents.replace('test-initial-token', 'test-edited-token'))
+            second = templates()
+            self.assertEqual(env_secrets.load(state)['telegram_bot_token'], 'test-edited-token')
+            for name in (*manifests.APPS, 'gateway', 'grafana'):
+                self.assertNotEqual(first[name]['metadata']['annotations'], second[name]['metadata']['annotations'], name)
+                self.assertNotIn('test-edited-token', json.dumps(second[name]))
+            self.assertEqual(first['frontend'], second['frontend'])
+            self.assertNotIn('secretKeyRef', json.dumps(second['frontend']))
+            self.assertNotIn('test-edited-token', json.dumps(second['frontend']))
 
 
 class BrokerProvisioning(unittest.TestCase):

@@ -84,20 +84,20 @@ def require_tools():
 
 
 def create_secrets(state):
+    import env_secrets
+    from security_material import ensure
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(state, 0o700)
-    path = state / 'secrets.json'
-    if path.exists():
-        values = json.loads(path.read_text())
-        for file in ('ca.crt', 'ca.key', 'tls.crt', 'tls.key', 'signing.pem', 'backup.key'):
+    if (state / 'secrets.json').exists():
+        env_secrets.migrate(state)
+    if env_secrets.exists(state):
+        values = env_secrets.load(state)
+        env_secrets.materialize(state)
+        for file in ('ca.crt', 'tls.crt'):
             if not (state / file).is_file():
                 raise RuntimeError(f'Existing state incomplete ({file}); restore saved local credentials; never rotate implicitly')
-        if 'gateway_token' not in values:
-            values['gateway_token'] = secrets.token_urlsafe(32)
-            from private_files import atomic_json
-            atomic_json(path, values)
-        from security_material import ensure
         return ensure(state, values, run)
+    configured = env_secrets.initial_values(state)
     values = {name: secrets.token_urlsafe(32) for name in ('postgres_password', 'identity_token', 'profile_token', 'notification_token', 'admin_token', 'gateway_token', 'grafana_password', 'admin_password', 'telegram_webhook_secret')}
     values['admin_email'] = os.environ.get('ADMIN_EMAIL', 'admin@sso.local')
     values['admin_password'] = os.environ.get('ADMIN_PASSWORD', values['admin_password'])
@@ -105,6 +105,7 @@ def create_secrets(state):
     for db in manifests.DBS:
         for role in ('runtime', 'migration'):
             values[f'{db}_{role}_password'] = secrets.token_urlsafe(32)
+    values.update(configured)
     old_mask = os.umask(0o077)
     try:
         run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', state / 'ca.key'])
@@ -119,12 +120,13 @@ def create_secrets(state):
         run(['openssl', 'x509', '-req', '-in', state / 'tls.csr', '-CA', state / 'ca.crt', '-CAkey', state / 'ca.key', '-CAcreateserial', '-days', '90', '-sha256', '-extfile', state / 'tls.ext', '-out', state / 'tls.crt'])
         run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', state / 'signing.pem'])
         (state / 'backup.key').write_text(secrets.token_urlsafe(64) + '\n')
-        from private_files import atomic_json
-        atomic_json(path, values)
+        ensure(state, values, run, initialize=True)
+        env_secrets.save(state, values)
+        env_secrets.capture_private(state)
+        env_secrets.initialize(state)
     finally:
         os.umask(old_mask)
-    from security_material import ensure
-    return ensure(state, values, run)
+    return values
 
 
 def workspace_hash(workspace=WORKSPACE):
@@ -316,8 +318,10 @@ def provision_databases(values):
         statements = []
         for role in ('migration', 'runtime'):
             username = f'{db}_{role}'
-            password = values[f'{username}_password']
-            statements.append(f"SELECT 'CREATE ROLE {username} LOGIN PASSWORD ''{password}''' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{username}')\\gexec")
+            password = "'" + values[f'{username}_password'].replace("'", "''") + "'"
+            command = f'CREATE ROLE {username} LOGIN PASSWORD {password}'
+            literal = "'" + command.replace("'", "''") + "'"
+            statements.append(f"SELECT {literal} WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{username}')\\gexec")
         statements += [f"SELECT 'CREATE DATABASE {db}_db OWNER {db}_migration' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='{db}_db')\\gexec", f'REVOKE CONNECT ON DATABASE {db}_db FROM PUBLIC;', f'GRANT CONNECT ON DATABASE {db}_db TO {db}_runtime;']
         dbsql('\n'.join(statements) + '\n')
         dbsql(f'REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT ALL ON SCHEMA public TO {db}_migration; CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; ALTER DEFAULT PRIVILEGES FOR ROLE {db}_migration IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO {db}_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE {db}_migration IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO {db}_runtime;', f'{db}_db')
@@ -372,6 +376,8 @@ def up():
     if images['source_sha256'] != workspace_hash():
         raise RuntimeError('Build inputs changed since image lock; run make build')
     cluster()
+    from credential_guard import verify
+    verify(sys.modules[__name__], values)
     for name in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend', *PATCHED_COMPONENTS):
         verify_local_image(name, images[name], images[name + '_id'])
         run(['k3d', 'image', 'import', images[name], '-c', CLUSTER], timeout=600)
@@ -392,8 +398,8 @@ def up():
     topics()
     from broker_security import provision
     provision(sys.modules[__name__], values)
-    apply(manifests.monitoring(images))
-    apply(manifests.applications(images))
+    apply(manifests.monitoring(images, STATE))
+    apply(manifests.applications(images, STATE))
     # A TCP load balancer bypasses HTTP termination: nginx presents the locally generated certificate.
     expose_gateway()
     for name in [*manifests.APPS, 'frontend', 'gateway', 'mailpit', 'tempo', 'prometheus', 'grafana', 'otel-collector']:
@@ -410,7 +416,7 @@ def expose_gateway():
 
 def bootstrap_admin():
     images = load_images()
-    app = next(item for item in manifests.applications(images) if item['kind'] == 'Deployment' and item['metadata']['name'] == 'identity-service')
+    app = next(item for item in manifests.applications(images, STATE) if item['kind'] == 'Deployment' and item['metadata']['name'] == 'identity-service')
     spec = app['spec']['template']['spec']
     spec['restartPolicy'] = 'Never'
     c = spec['containers'][0]
@@ -420,7 +426,7 @@ def bootstrap_admin():
     name = 'bootstrap-admin-' + uuid.uuid4().hex[:8]
     apply([manifests.resource('Job', name, {'backoffLimit': 0, 'activeDeadlineSeconds': 120, 'ttlSecondsAfterFinished': 86400, 'template': {'metadata': {'labels': {'app': 'identity-service'}}, 'spec': spec}})])
     kube('wait', '--for=condition=complete', 'job/' + name, '--timeout=150s')
-    print('Admin bootstrapped; credentials remain only in .local/secrets.json. Complete MFA before admin commands.')
+    print('Admin bootstrapped; credentials are in identity-service/.env. Complete MFA before admin commands.')
 
 
 def encrypt_file(source, destination, key):
@@ -445,6 +451,8 @@ def decrypt_file(source, destination, key):
 
 
 def backup():
+    import env_secrets
+    env_secrets.materialize(STATE)
     from fault_lifecycle import wait_writable
     wait_writable(sys.modules[__name__])
     backup_dir = STATE / 'backups' / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8])
@@ -496,6 +504,8 @@ def logical_fingerprint(database, snapshot=None):
 def restore_verify(path):
     if not (path / 'manifest.json').is_file():
         raise RuntimeError('Select one complete backup directory')
+    import env_secrets
+    env_secrets.materialize(STATE)
     results = {}
     for db in manifests.DBS:
         restore_db = 'restore_' + uuid.uuid4().hex
@@ -744,6 +754,8 @@ def main():
         with exclusive(STATE):
             persistence()
     elif args.command == 'repair-certificates':
+        import env_secrets
+        env_secrets.materialize(STATE)
         from certificate_repair import repair
         repair(sys.modules[__name__])
     elif args.command == 'rekey':

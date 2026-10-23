@@ -1,8 +1,28 @@
 # Local remediation acceptance
 
-Current policy: image/dependency vulnerability scanners are removed by explicit owner instruction and must not run. Their historical results below remain history, not current acceptance gates. Local business behavior, secrets, RBAC/TLS, configuration/schema validation, builds and tests remain required. Host automatic recovery/external hosting remain excluded; real Telegram delivery requires missing credentials.
+Current policy: image/dependency vulnerability scanners are removed by explicit owner instruction and must not run. Their historical results below remain history, not current acceptance gates. Local business behavior, secrets, RBAC/TLS, configuration/schema validation, builds and tests remain required. Host automatic recovery/external hosting remain excluded. Genuine Telegram linking and login-alert delivery subsequently passed; evidence below supersedes historical missing-credential notes.
 
 After scanner deletion,85 remaining Python tests passed6.267s (one opt-in broker test skipped); removed six scanner-only tests are not counted as passing tests. Five changed workflows passed actionlint and YAML parsing. Real schema validation, running-stand check and login/profile/logout smoke passed without vulnerability scanning. Secret/configuration checks and all existing security patches remain active.
+
+## Repository environment migration
+
+Canonical credentials and all private PEM/backup-key bytes were migrated into the three owning repository `.env` files with mode0600 and Git ignore verification. A private comparison proved equality with both the former saved manifest and actual running `platform-secrets`; every private key and public certificate remained byte-identical. The active legacy JSON was removed only after comparison, and repeat initialization returned the same credentials. No rotation, account reset or PVC replacement occurred.
+
+The initial integrated Python suite ran119tests in9.272s:118passed, one opt-in broker smoke skipped. Tests cover literal/escaped dotenv parsing, exact ownership, Telegram edits, interrupted legacy publication/deletion, missing-owner fail-closed behavior and derived-key restoration. A pre-migration four-database backup's authenticated source snapshots decrypted successfully using the canonical `.env` backup key, preserving its exact trailing newline.
+
+Actual `make build; make up; make check` completed321.86s with existing data retained. Every API/worker/gateway/Grafana Deployment had the canonical credential revision and all desired replicas updated/available; runtime Secret values matched owner env. Full strict-TLS core plus administrator MFA/ban/unban/audit acceptance passed33.41s. A real disposable PostgreSQL database and both roles authenticated a configured password containing quotes, URL-special characters, a backslash and newline; original resources were untouched and disposable resources removed3.63s. Live read-only preflight accepted unchanged credentials/Telegram edits and refused a changed DB password without applying any mutation. No real Telegram delivery is claimed until a bot token is supplied.
+
+After independent review corrections, the final suite ran129tests in10.375s:128passed, one opt-in broker test skipped. Regression cases include quoted DB credentials, URI encoding, immutable persisted-credential preflight, explicit unused legacy recovery and completed rekey followed by preflight. A disposable-process fault injection removing final rekey runtime publication made the focused regression fail as intended. A new authenticated four-database backup and disposable row-content-matching restore completed48.18s (`20261023T124933Z-bfb6f965`). Independent read-only review reported no remaining Critical/Important findings; no vulnerability scanning was performed.
+
+Final normal guarded `make up; make check` plus real login/profile/logout probe passed153.34s after the SQL/DSN/preflight/rekey corrections. Existing Kubernetes nodes and all retained data remained unchanged; Telegram remains optional/unconfigured pending user input in the Go owner `.env`.
+
+## Real Telegram acceptance
+
+The owner supplied the bot token in `/home/bpqvg/dev/h1wtest/user-notification-service/.env`; only that token was imported into the active Go owner env, without importing stale unrelated credentials. Actual `getMe` succeeded; normal `make up; make check` applied the configuration183.95s. A temporary ngrok HTTPS tunnel exposes only the exact Telegram webhook through a loopback relay with strict upstream CA verification and inspection disabled: root/API paths404, wrong webhook secret403, authenticated malformed JSON400. No synthetic Telegram update or direct test send substituted for the business path.
+
+The user opened the application-generated one-use link and pressed Start in a genuine private Telegram chat. Verification passed2.52s: authenticated webhook bound the account, notification settings persisted, and an actual subsequent login's session ID correlated to its authoritative outbox event and exactly one Telegram delivery job with status `sent` and nonnull delivery time. The real Bot API accepted the worker request; persisted evidence recorded one attempt and no reported webhook error. Private account/chat/link/event/job evidence remains only in ignored `.local/acceptance/telegram.json`; no bot secret is published. Provider acceptance is not a human-read receipt. The webhook tunnel is temporary, not external-hosting or unattended tunnel-recovery certification.
+
+
 
 ## Re-run
 
@@ -25,7 +45,9 @@ make persistence
 make chaos TARGET=identity-service PROBE='sh scripts/acceptance/probe.sh'
 ```
 
-Individual gates: `e2e`, `negative`, `race`, `events`, `network`, `broker-acl`, `db-privileges`, `tls`. `ARGS='--mailpit http://127.0.0.1:28026 --state-directory /private/custom/path'` controls loopback mail/state, and `--ca` controls explicit trust file. Environment `ACCEPTANCE_DIRECTORY`, `ACCEPTANCE_MAILPIT`, `ACCEPTANCE_BASE` supported; dispatcher restricts origin to the isolated `https://localhost:8448` stand. `probe.sh` uses ignored state and explicit CA automatically. `admin` reads bootstrap admin credentials privately from `.local/secrets.json`, completes actual MFA and stores its TOTP secret only in ignored state.
+Individual gates: `e2e`, `negative`, `race`, `events`, `network`, `broker-acl`, `db-privileges`, `tls`. `ARGS='--mailpit http://127.0.0.1:28026 --state-directory /private/custom/path'` controls loopback mail/state, and `--ca` controls explicit trust file. Environment `ACCEPTANCE_DIRECTORY`, `ACCEPTANCE_MAILPIT`, `ACCEPTANCE_BASE` supported; dispatcher restricts origin to the isolated `https://localhost:8448` stand. `probe.sh` uses ignored state and explicit CA automatically. `admin` reads bootstrap credentials privately from canonical `identity-service/.env` (`ADMIN_EMAIL`, `ADMIN_PASSWORD`) through the owner env loader, completes actual MFA and stores its TOTP secret only in ignored acceptance state.
+
+Credential configuration uses ignored mode0600 `platform-infra/.env`, `identity-service/.env` and `user-notification-service/.env`, never an active `.local/secrets.json`. Real Telegram token/webhook secret must be set only in `user-notification-service/.env`; empty optional bot token means unavailable, not successful delivery. After editing owner env, normal `make up` reapplies Secrets and changes credential-consumer pod-template revisions so running services reload environment values. Frontend has no secret input. Historical reports below describe the storage and observed prerequisites at the time; they are not instructions to restore legacy active configuration.
 
 For a previously enrolled administrator, preserve/provide its own mode0600 `admin-state.json`; missing state is an explicit prerequisite error, never a server MFA reset or DB secret extraction. Admin/replay share an owner-state flock, wait for the next real30s TOTP counter (bounded32s), atomically reserve it before request and never retry rejected factors. This prevents legitimate replay protection from being mistaken for application failure in sequential acceptance.
 
@@ -177,7 +199,7 @@ Docker/Ubuntu integration was checked from inside Ubuntu, unrelated `dsh-hindsig
 
 ## External boundaries
 
-Telegram Bot API credentials/chat/public webhook absent: external gate open, no mocked delivery accepted. AWS/cloud not deployed or queried. No production acceptance, PITR or independent-host/zone HA claim. Remote publication into h1wtest and real CI runs are explicitly authorized by the current request and tracked separately from local runtime results; remaining image findings are not waived by publication.
+Genuine Telegram bot/private-chat/webhook linking and login-alert delivery are now exercised as recorded above; earlier absent-credential observations remain historical. AWS/cloud were not deployed or queried. No production acceptance, PITR or independent-host/zone HA claim. Publication and remote CI are separate from local runtime evidence; historical image findings are not clean-security claims.
 
 ## Local security and operator closure
 
