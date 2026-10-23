@@ -71,6 +71,8 @@ def execute(runtime, unused=False):
         return
     if runtime.CONTEXT not in context:
         raise RuntimeError('No isolated cluster: use explicit rekey --unused only for unused bootstrap credentials')
+    from helm_release import prepare_rekey, publish_rekey
+    publication = prepare_rekey(runtime, values)
     # Kafka historical encrypted commands cannot be rewritten in place. Refuse until retention removes all old records.
     topics = runtime.kube('exec', 'redpanda-0', '--', 'rpk', '-X', 'brokers=localhost:29092', 'topic', 'describe', 'notification.commands.v1', '-p', '--format', 'json').stdout
     partitions = json.loads(topics)
@@ -137,7 +139,7 @@ def execute(runtime, unused=False):
     final_values.pop('encryption_key')
     # Writers remain stopped. Publish only after every owner committed, retaining
     # legacy + targets in env/archive until publication succeeds for safe retry.
-    runtime.apply([manifests.secret('platform-secrets', final_values)])
+    publish_rekey(runtime, publication, final_values)
     env_secrets.save(runtime.STATE, final_values)
     runtime.kube('delete', 'secret', 'rekey-material')
     print('All owner ciphertext rekeys committed. Runtime remains stopped; run make up to migrate/apply purpose-separated configuration and resume.')

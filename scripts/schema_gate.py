@@ -21,7 +21,8 @@ def verify():
         runtime = manifests.database_url('identity_runtime', values['identity_runtime_password'], database)
         migration = manifests.database_url('identity_migration', values['identity_migration_password'], database)
         cli.apply([manifests.secret(name, {'runtime': runtime, 'migration': migration})])
-        deployment = next(r for r in manifests.applications(cli.load_images(), cli.STATE) if r['kind'] == 'Deployment' and r['metadata']['name'] == 'identity-service')
+        from helm_release import service_deployment
+        deployment = service_deployment(cli, 'identity-service', cli.load_images())
         deployment['metadata']['name'] = name
         deployment['spec']['replicas'] = 1
         spec = deployment['spec']['template']['spec']

@@ -19,6 +19,12 @@ jobs:
           echo 'f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f  /tmp/uv.tar.gz' | sha256sum --check
           tar -xzf /tmp/uv.tar.gz -C /tmp
           sudo install /tmp/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv
+      - name: Install pinned Helm with verified digest
+        run: |
+          curl --fail --silent --show-error --location --max-time 120 https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz --output /tmp/helm.tar.gz
+          echo '0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b  /tmp/helm.tar.gz' | sha256sum --check
+          tar -xzf /tmp/helm.tar.gz -C /tmp
+          sudo install /tmp/linux-amd64/helm /usr/local/bin/helm
       - name: Compile scripts and run behavior regressions
         run: |
           uv run --no-project --python 3.12.10 python -m compileall -q scripts
@@ -38,7 +44,8 @@ jobs:
           docker run --rm -v "$PWD/observability:/etc/platform:ro" docker.io/grafana/tempo:3.1.1@sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044 -config.file=/etc/platform/tempo.yml -config.verify=true
       - name: Scan IaC security configuration
         run: |
-          docker run --rm -v "$PWD:/repo:ro" docker.io/aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c config --exit-code 1 --severity HIGH,CRITICAL /repo
+          # Charts require environment values; scan their real rendered resources below, not invalid empty defaults or private historical .local artifacts.
+          docker run --rm -v "$PWD/components:/recipes:ro" docker.io/aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c config --exit-code 1 --severity HIGH,CRITICAL /recipes
           uv run --no-project --python 3.12.10 python scripts/scan_config.py /tmp/resources.json
       - name: Validate generated Kubernetes config without contacting cluster
         run: |

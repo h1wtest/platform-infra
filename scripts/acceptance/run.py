@@ -7,7 +7,7 @@ import sys
 from common import BASE, CA, MAILPIT, ROOT, STATE, primary, run_module
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('gate', nargs='?', default='core', choices=['core', 'e2e', 'probe', 'negative', 'admin', 'race', 'events', 'smtp-fault', 'load', 'business-load', 'network', 'broker-acl', 'db-privileges', 'trace', 'failure', 'replay', 'tls'])
+parser.add_argument('gate', nargs='?', default='core', choices=['core', 'e2e', 'probe', 'negative', 'admin', 'race', 'events', 'smtp-fault', 'load', 'business-load', 'network', 'broker-acl', 'db-privileges', 'trace', 'failure', 'replay', 'tls', 'rolling'])
 parser.add_argument('--base', default=BASE)
 parser.add_argument('--mailpit', default=MAILPIT)
 parser.add_argument('--state-directory', type=Path, default=STATE)
@@ -56,6 +56,7 @@ def gate(name):
             if name == 'failure': run_module('failure_fixture', '--state', state)
             else: run_module('replay', '--ca', args.ca)
     elif name == 'tls': run_module('tls', '--base', args.base, '--ca', args.ca)
+    elif name == 'rolling': run_module('rolling')
 
 if args.gate == 'core':
     for name in ('tls', 'e2e', 'negative', 'race', 'events', 'broker-acl', 'db-privileges', 'network'):

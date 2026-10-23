@@ -72,7 +72,7 @@ def require_tools():
         candidate = Path.home() / 'go/bin/k3d'
         if candidate.is_file():
             os.environ['PATH'] += os.pathsep + str(candidate.parent)
-    missing = [name for name in ('docker', 'kubectl', 'k3d', 'openssl', 'curl') if not shutil.which(name)]
+    missing = [name for name in ('docker', 'kubectl', 'k3d', 'helm', 'openssl', 'curl') if not shutil.which(name)]
     if missing:
         raise RuntimeError('Install prerequisites before continuing: ' + ', '.join(missing) + '. k3d required version: v5.9.0; kubectl compatible with Kubernetes1.35.')
     version = run(['k3d', 'version']).stdout.decode()
@@ -81,6 +81,8 @@ def require_tools():
     client = json.loads(run(['kubectl', 'version', '--client', '-o', 'json']).stdout)['clientVersion']
     if client.get('major') != '1' or client.get('minor', '').rstrip('+') not in ('34', '35', '36'):
         raise RuntimeError('kubectl minor must be within one of pinned Kubernetes1.35 (use kubectl1.36.1); installed client is unsupported')
+    if run(['helm', 'version', '--template', '{{.Version}}']).stdout.decode().strip() != 'v4.3.1':
+        raise RuntimeError('Use checksum-pinned Helm v4.3.1; run scripts/bootstrap-tools.sh')
 
 
 def create_secrets(state):
@@ -327,9 +329,9 @@ def provision_databases(values):
         dbsql(f'REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT ALL ON SCHEMA public TO {db}_migration; CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; ALTER DEFAULT PRIVILEGES FOR ROLE {db}_migration IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO {db}_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE {db}_migration IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO {db}_runtime;', f'{db}_db')
 
 
-def migration_jobs(images):
+def migration_jobs(images, selected=None):
     for name, (target, _, db) in manifests.APPS.items():
-        if target == 'worker':
+        if target == 'worker' or (selected is not None and name != selected):
             continue
         job_name = 'migrate-' + target + '-' + uuid.uuid4().hex[:8]
         spec = manifests.pod(name, images[target], env={'DATABASE_URL': (db + '-database', 'MIGRATION_DATABASE_URL'), **({'MFA_ENCRYPTION_KEY': ('platform-secrets', 'mfa_encryption_key')} if target == 'identity' else {})}, args=['migrate'])
@@ -376,15 +378,23 @@ def up():
     if images['source_sha256'] != workspace_hash():
         raise RuntimeError('Build inputs changed since image lock; run make build')
     cluster()
+    from release_control import selected_images
+    images = selected_images(sys.modules[__name__], images, reconcile=True)
     from credential_guard import verify
     verify(sys.modules[__name__], values)
     for name in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend', *PATCHED_COMPONENTS):
-        verify_local_image(name, images[name], images[name + '_id'])
+        if images[name].startswith('sso-remediation/'):
+            verify_local_image(name, images[name], images[name + '_id'])
+        else:
+            run(['docker', 'pull', images[name]], timeout=900)
         run(['k3d', 'image', 'import', images[name], '-c', CLUSTER], timeout=600)
     install_operator(images)
-    apply(manifests.infrastructure(images, STATE, ROOT / 'observability'))
-    from api_network import discover
-    apply([discover(sys.modules[__name__])])
+    import helm_release
+    from release_control import specs
+    desired = specs(sys.modules[__name__], images)
+    apply([{'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': NS, 'labels': {'pod-security.kubernetes.io/enforce': 'restricted', 'pod-security.kubernetes.io/enforce-version': 'v1.33'}}}])
+    for release in ('platform-config', 'postgres', 'redpanda', 'mailpit'):
+        helm_release.deploy(sys.modules[__name__], release, desired[release], timeout=360)
     kube('wait', '--for=condition=Ready', 'cluster.postgresql.cnpg.io/postgres', '--timeout=300s')
     from cnpg_operator import wait_instances
     wait_instances(sys.modules[__name__], images['cnpg-operator'])
@@ -398,25 +408,18 @@ def up():
     topics()
     from broker_security import provision
     provision(sys.modules[__name__], values)
-    apply(manifests.monitoring(images, STATE))
-    apply(manifests.applications(images, STATE))
-    # A TCP load balancer bypasses HTTP termination: nginx presents the locally generated certificate.
-    expose_gateway()
+    from release_values import APPLICATION_RELEASES
+    for release in ('prometheus', 'tempo', 'otel-collector', 'grafana', *APPLICATION_RELEASES):
+        helm_release.deploy(sys.modules[__name__], release, desired[release], timeout=240)
     for name in [*manifests.APPS, 'frontend', 'gateway', 'mailpit', 'tempo', 'prometheus', 'grafana', 'otel-collector']:
         kube('rollout', 'status', 'deployment/' + name, '--timeout=240s')
     print('Local environment available at https://localhost:8448 (trust .local/ca.crt explicitly). Existing clusters untouched.')
 
 
-def expose_gateway():
-    # K3s ServiceLB binds node host ports; k3d's own LB forwards public 80/443 to these nodes.
-    service = manifests.service('gateway-public', [(443, 8443), (80, 8080)], selector='gateway')
-    service['spec']['type'] = 'LoadBalancer'
-    apply([service])
-
-
 def bootstrap_admin():
     images = load_images()
-    app = next(item for item in manifests.applications(images, STATE) if item['kind'] == 'Deployment' and item['metadata']['name'] == 'identity-service')
+    from helm_release import service_deployment
+    app = service_deployment(sys.modules[__name__], 'identity-service', images)
     spec = app['spec']['template']['spec']
     spec['restartPolicy'] = 'Never'
     c = spec['containers'][0]
@@ -653,15 +656,18 @@ def persistence():
 
 
 def alerts():
-    name = 'acceptance-alert-' + uuid.uuid4().hex[:8]
     rules = '  - name: acceptance\n    rules:\n      - alert: AcceptanceProbe\n        expr: vector(1)\n        for: 0s\n        labels:\n          severity: test\n'
-    original = (ROOT / 'observability/alerts.yml').read_text()
-    cm = manifests.resource('ConfigMap', 'alerts-yml', data={'alerts.yml': original + '\n' + rules})
-    apply([cm])
-    kube('rollout', 'restart', 'deployment/prometheus')
-    kube('rollout', 'status', 'deployment/prometheus', '--timeout=180s')
-    process = subprocess.Popen(['kubectl', '--context', CONTEXT, '-n', NS, 'port-forward', '--address=127.0.0.1', 'service/prometheus', '29090:9090'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import copy
+    import helm_release
+    configuration = helm_release.current_values(sys.modules[__name__], 'platform-config')
+    temporary = copy.deepcopy(configuration)
+    temporary['configMaps']['alerts-yml']['alerts.yml'] += '\n' + rules
+    process = None
     try:
+        helm_release.deploy(sys.modules[__name__], 'platform-config', {'chart': 'platform-config', 'values': temporary})
+        kube('rollout', 'restart', 'deployment/prometheus')
+        kube('rollout', 'status', 'deployment/prometheus', '--timeout=180s')
+        process = subprocess.Popen(['kubectl', '--context', CONTEXT, '-n', NS, 'port-forward', '--address=127.0.0.1', 'service/prometheus', '29090:9090'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
@@ -676,8 +682,9 @@ def alerts():
             time.sleep(2)
         raise RuntimeError('Acceptance alert did not reach firing state')
     finally:
-        process.terminate(); process.wait(timeout=10)
-        apply([manifests.resource('ConfigMap', 'alerts-yml', data={'alerts.yml': original})])
+        if process is not None:
+            process.terminate(); process.wait(timeout=10)
+        helm_release.restore_config(sys.modules[__name__], configuration)
         kube('rollout', 'restart', 'deployment/prometheus')
         kube('rollout', 'status', 'deployment/prometheus', '--timeout=180s')
 
@@ -685,7 +692,7 @@ def alerts():
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for command in ('secrets', 'build', 'up', 'check', 'status', 'stop', 'start', 'cluster-identity', 'bootstrap-admin', 'backup', 'schedule-backups', 'schema-gate', 'persistence', 'repair-certificates', 'alerts', 'mailpit', 'prometheus', 'grafana', 'tempo'):
+    for command in ('secrets', 'build', 'up', 'check', 'status', 'stop', 'start', 'cluster-identity', 'bootstrap-admin', 'backup', 'schedule-backups', 'schema-gate', 'persistence', 'repair-certificates', 'alerts', 'mailpit', 'prometheus', 'grafana', 'tempo', 'helm-adopt', 'releases'):
         commands.add_parser(command)
 
     def backup_path(value):
@@ -709,6 +716,30 @@ def parse_arguments(argv=None):
     fault.add_argument('--probe', type=business_probe, required=True, help='Real business command executed without a shell before and after injection')
     rekey = commands.add_parser('rekey')
     rekey.add_argument('--unused', action='store_true', help='Explicitly archive unused bootstrap legacy key; requires no isolated namespace or retained data volumes')
+    from release_control import immutable_image
+    def image_reference(value):
+        try:
+            return immutable_image(value)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(str(error)) from error
+    def release_timeout(value):
+        try:
+            seconds = int(value)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError('timeout must be integer seconds') from error
+        if not 1 <= seconds <= 3600:
+            raise argparse.ArgumentTypeError('timeout must be between 1 and 3600 seconds')
+        return seconds
+    release = commands.add_parser('release')
+    release.add_argument('--service', choices=[*manifests.APPS, 'frontend', 'gateway'], required=True)
+    release.add_argument('--image', type=image_reference, required=True)
+    release.add_argument('--probe', type=business_probe, required=True)
+    release.add_argument('--timeout', type=release_timeout, default=240)
+    rollback = commands.add_parser('release-rollback')
+    rollback.add_argument('--service', choices=[*manifests.APPS, 'frontend', 'gateway'], required=True)
+    rollback.add_argument('--revision', type=release_timeout, required=True)
+    rollback.add_argument('--probe', type=business_probe, required=True)
+    rollback.add_argument('--timeout', type=release_timeout, default=240)
     return parser.parse_args(argv)
 
 
@@ -717,7 +748,22 @@ def main():
     require_tools()
     if args.command == 'secrets': create_secrets(STATE); print('Local secrets generated or retained; no global trust installation.')
     elif args.command == 'build': build_images()
-    elif args.command == 'up': up()
+    elif args.command in ('up', 'helm-adopt', 'release', 'release-rollback'):
+        from fault_lifecycle import exclusive
+        with exclusive(STATE, timeout=300):
+            if args.command == 'up':
+                up()
+            else:
+                import release_control
+                if args.command == 'helm-adopt':
+                    release_control.adopt(sys.modules[__name__])
+                elif args.command == 'release-rollback':
+                    release_control.rollback(sys.modules[__name__], args.service, args.revision, args.probe, args.timeout)
+                else:
+                    release_control.update(sys.modules[__name__], args.service, args.image, args.probe, args.timeout)
+    elif args.command == 'releases':
+        from release_control import status
+        status(sys.modules[__name__])
     elif args.command == 'check': check()
     elif args.command == 'status': run(['kubectl', '--context', CONTEXT, '-n', NS, 'get', 'pods,pvc,svc,hpa,pdb', '-o', 'wide'], capture=False)
     elif args.command == 'stop': run(['k3d', 'cluster', 'stop', CLUSTER])
@@ -748,7 +794,10 @@ def main():
                     except Exception as recovery_error:
                         print('PostgreSQL recovery still pending; no further injection allowed until Ready writable primary.', file=sys.stderr)
                 raise
-    elif args.command == 'alerts': alerts()
+    elif args.command == 'alerts':
+        from fault_lifecycle import exclusive
+        with exclusive(STATE, timeout=300):
+            alerts()
     elif args.command == 'persistence':
         from fault_lifecycle import exclusive
         with exclusive(STATE):
@@ -759,8 +808,10 @@ def main():
         from certificate_repair import repair
         repair(sys.modules[__name__])
     elif args.command == 'rekey':
+        from fault_lifecycle import exclusive
         from rekey import execute
-        execute(sys.modules[__name__], unused=args.unused)
+        with exclusive(STATE, timeout=300):
+            execute(sys.modules[__name__], unused=args.unused)
     elif args.command == 'schema-gate':
         from schema_gate import verify
         verify()

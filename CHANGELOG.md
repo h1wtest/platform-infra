@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-23 — registration benchmark
+
+- Added independent `make benchmark-registration` with bounded concurrency, unique disposable users, strict HTTPS/CSRF and unchanged rate limits. Reports successful latency separately from throttles/errors, real registrations/s, per-status counts and protected per-run JSON; all-throttled runs explicitly exit blocked rather than claim capacity.
+- Real runs: 40/40 registrations with 4 workers in 1.219422s, successful p95 181.785ms; 60 registrations/140 HTTP429 with 8 workers in 2.010040s, successful p95 202.661ms. Read-only SQL verified all 100 users and two outbox records per successful registration; no delivery/verification or maximum sustainable capacity claim.
+
+## 2026-10-23 — independent Helm delivery
+
+- Replaced persistent Python manifest generators with six real charts and fifteen independent application/infrastructure releases. Preserved names, selectors, TLS/network restrictions, PostgreSQL/broker storage and explicit operator bootstrap.
+- Added checksum-pinned Helm4.3.1, complete-inventory guarded metadata adoption, private values/failure evidence, bounded application rolling update and explicit configuration rollback. No first-install auto-uninstall or infrastructure/data auto-rollback.
+- Selected-service release runs only its owner migration and release, checks a real before/after business probe, retains immutable image selection and reconciles manual recovery against deployed Helm values. Canonical local image names fail early; Helm readiness is followed by full Deployment rollout completion.
+- Serialized rekey/alert maintenance with release/up; alert configuration publication/restoration uses its Helm owner. Preserved the one-time unmanaged legacy rekey publication path with original UID/resourceVersion/data fencing and archive-backed interrupted-state recovery.
+- Static validation renders the actual charts; CI scans rendered objects and tracked component recipes rather than invalid empty chart defaults or private historical artifacts. No image/dependency vulnerability scanning was reintroduced.
+- Verified actual successful/non-ready/business-rejected Profile updates with885authenticated requests and zero failures, explicit rollback surviving full up, retained resource/PVC identities, full core/admin/schema/alert acceptance and174deterministic tests (one opt-in skip). Preserved original failed acceptance reports and fixed the observed Helm readiness/full-rollout gap.
+
 ## 2026-10-23 — isolated platform remediation
 
 - Moved canonical credentials and private keys into ignored owner repository `.env` files; runtime/schema/acceptance consumers read the owner store and explicit rekey saves there while preserving protected historical recovery archives. Legacy import validates exact credentials/private bytes without rotation or a persistent secrets.json cache. Telegram configuration belongs to the Go repository; frontend/build contexts/source exports receive no secrets.

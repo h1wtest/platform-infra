@@ -4,7 +4,7 @@
 
 ## Предварительные условия
 
-Linux x86_64/WSL2, Docker Desktop/Engine, curl, OpenSSL, make, Python3.12+, uv0.13.5, k3d5.9.0, kubectl1.36.1 (minor34–36). Новый bootstrap фиксирует K3s1.35.9-k3s1; ранее проверенный существующий stand1.35.5 не обновляется/удаляется автоматически и явно отмечается maintenance gate. CNPG1.30.1 поддерживает Kubernetes1.34/1.35/1.36 и PostgreSQL14–18 по [официальной матрице](https://cloudnative-pg.io/docs/current/supported_releases/); PostgreSQL18.6-standard-trixie. `bash scripts/bootstrap-tools.sh` устанавливает проверенные binaries в `~/.local/bin` без sudo/globalCA. Совместимые tools переустанавливать не нужно. `export PATH="$HOME/.local/bin:$PATH"`. Docker рекомендуется≥16GiRAM; Tempo3.1.1 требует headroom до4Gi. Requests/limits в `scripts/manifests.py`.
+Linux x86_64/WSL2, Docker Desktop/Engine, curl, OpenSSL, make, Python3.12+, uv0.13.5, Helm4.3.1, k3d5.9.0, kubectl1.36.1 (minor34–36). Новый bootstrap фиксирует K3s1.35.9-k3s1; существующий stand1.35.5 не обновляется/удаляется автоматически и отмечается maintenance gate. CNPG1.30.1 поддерживает Kubernetes1.34/1.35/1.36 и PostgreSQL14–18 по [официальной матрице](https://cloudnative-pg.io/docs/current/supported_releases/); PostgreSQL18.6-standard-trixie. `bash scripts/bootstrap-tools.sh` устанавливает checksum-проверенные binaries в `~/.local/bin` без sudo/globalCA. `export PATH="$HOME/.local/bin:$PATH"`. Docker рекомендуется≥16GiRAM; Tempo3.1.1 требует headroom до4Gi. Requests/limits описаны в `charts/`, параметры окружения — в `scripts/release_values.py`.
 
 Рядом должны находиться `identity-service`, `user-notification-service`, `frontend`, `platform-contracts`. Docker contexts ограничены owner whitelist; lockfiles обязательны. Registry pins задают исходные PG18.6, CNPG1.30.1, Redpanda26.2.5, Mailpit1.32.0, Prometheus3.15.1, Grafana13.2.4-distroless-slim, Tempo3.1.1, Collector0.163.2 и nginx1.30-alpine. Gateway/Grafana/Tempo/CNPG используют сохранённые исправленные local builds. `build` фиксирует content-addressed tag/imageID, base, hashes recipe inputs и sourceSHA в `.local/images.lock.json`; изменения source/base/recipe требуют rebuild. CNPG release проверяется по official assetSHA256. По решению владельца сканирование уязвимостей образов и зависимостей удалено и не выполняется; старые отчёты — только история, не критерий приёмки. Это не утверждение об отсутствии уязвимостей.
 
@@ -41,6 +41,39 @@ Migration/rekey Job использует bounded initContainer из pinned Postg
 Legacy shared-key cutover не автоматический: сохранённый `ENCRYPTION_KEY` блокирует bootstrap/up. Явный `make rekey` также поддерживает ещё не импортированный legacy `.local/secrets.json`; он не является runtime fallback. Только для **никогда не использованных** credentials `make rekey ARGS=--unused` проверяет отсутствие namespace и retained PV и архивирует старый ключ0600. Для populated среды команда требует drain outbox/jobs, committed=end всех6 sensitive topic partitions и истечения уже настроенного Kafka retention (start=end; без truncation/deletion). Затем останавливает writers, повторно проверяет drain, делает encrypted backup и выполняет idempotent transactional rekey каждого DB owner. Старый ключ сохраняется до успеха всех owners и в protected historical archive для старых backup. Ошибка оставляет runtime остановленным и recovery material сохранённым; после успеха `make up` применяет purpose keys и возобновляет runtime. Это maintenance cutover, не прозрачный runtime fallback.
 
 Owner `.env` и historical recovery manifests публикуются атомарно: same-directory0600 tempfile → flush/fsync → os.replace → directory fsync. Перед первым owner rekey Job сохраняется protected полный `.local/rekey-precommit-*.json` (legacy плюс все target keys); финальный archive также содержит весь key manifest. Crash после DB commit не теряет target keys. Не удаляйте precommit/final manifests без проверенной защищённой копии; они столь же чувствительны, как owner `.env`, но никогда не являются активной конфигурацией.
+
+## Независимые Helm-релизы и обновления
+
+Persistent workloads имеют единственный источник манифестов — реальные Helm-шаблоны в `charts/`. Python собирает values из owner `.env` и lockfiles, проверяет local cluster identity, устанавливает проверенный CNPG operator и выполняет provisioning/одноразовые Jobs. Он больше не генерирует параллельные Deployment/Service/StatefulSet для `kubectl apply`. Оператор и его CRD/RBAC остаются отдельным проверенным bootstrap, а созданные CNPG дочерние ресурсы не перехватываются Helm.
+
+Отдельный релиз на каждый API, notification-worker, frontend и gateway. Отдельные инфраструктурные релизы: `platform-config` (Secrets/ConfigMaps/NetworkPolicy), `postgres` (CNPG Cluster), `redpanda`, `mailpit`, `prometheus`, `tempo`, `otel-collector`, `grafana`. Общий chart приложения не объединяет их историю или выпуск. Все операции явно фиксируют context `k3d-sso-remediation` и namespace `sso-remediation`; это local/dev доставка, не AWS deployment.
+
+Существующий до Helm стенд переносится явно: `make helm-adopt`, затем `make up`. Adoption сначала проверяет весь inventory, selectors, владельцев и credentials; только после этого меняет Helm metadata с проверкой UID/resourceVersion. Ничего не удаляет/пересоздаёт, не использует `--take-ownership`. Прерванный metadata-перенос можно повторить. На пустом стенде adoption не нужен. PVC и PostgreSQL Cluster имеют retention `keep`; uninstall не является штатной командой очистки или восстановления.
+
+```sh
+make releases
+make release SERVICE=profile-service \
+  IMAGE='registry.example/team/profile@sha256:<64-hex-digest>' \
+  PROBE='uv run --no-project python scripts/acceptance/run.py probe'
+# Для локального образа допустим только проверенный sso-remediation/<name>:sha256-<image-ID>.
+# TIMEOUT=240 — ожидание каждого Helm rollout; image import/migration/probe имеют отдельные пределы.
+make acceptance GATE=rolling
+make release-rollback SERVICE=profile-service REVISION=1 \
+  PROBE='uv run --no-project python scripts/acceptance/run.py probe'
+```
+
+`release` проверяет исходный бизнес-сценарий, импортирует только выбранный immutable image, запускает только миграцию DB owner выбранного API и обновляет только его Helm-релиз. Worker использует схему notification и сам миграцию не запускает. Приложения ждут готовности: maxUnavailable0/maxSurge1, minReadySeconds5, progress deadline180s; preStop5s плюс grace50s дают процессу завершить запросы/работу. HPA управляет replicas API: Helm их не сбрасывает при обновлении. Наличие свободных ресурсов обязательно; soft topology spread не доказывает разнесение копий на любых двух физических EC2.
+
+Неудачная readiness останавливает выпуск и возвращает предыдущую конфигурацию приложения; первая установка поверх adopted ресурсов не выполняет destructive auto-uninstall. После readiness выполняется переданный business probe; его отказ также возвращает предыдущую успешную ревизию, но команда завершается ошибкой. Успешный выбранный image атомарно сохраняется в `.local/release-images.json`: обычный последующий `make up` не возвращает старый image из full-build lock. Full build и независимый release — разные операции; full build не публикует образы в registry. Проверка probe должна соответствовать сервису: login/profile не доказывает доставку worker или корректность frontend.
+Успех приложения требует также завершённого `kubectl rollout status`: одной Helm legacy readiness недостаточно, она может вернуть управление до удаления старых копий. `release-rollback` выполняет конфигурационный возврат под тем же lock, ждёт полный rollout, согласует selected image и проверяет business probe. Full `up` сверяет сохранённые selections с фактически deployed Helm values: ручной успешный Helm rollback не переигрывается обратно старой записью. Failed/pending состояние не переопределяется молча.
+
+Миграции назад не выполняются. Выпуск обязан сохранять совместимость старых/новых HTTP/gRPC клиентов, Kafka producers/consumers и сохранённых событий: сначала добавить совместимое поле/схему, затем перевести потребителей/данные, удалить старое отдельным выпуском после закрытия окна возврата. Helm не проверяет семантику контрактов. Воркер обновляется через consumer rebalance/at-least-once и идемпотентность, а не HTTP-процент canary; external SMTP exactly-once не обещается. Canary/blue-green и автоматический анализ метрик сейчас не внедрены.
+Rekey сериализован с up/release/rollback/alert maintenance. До остановки writers проверяется путь финальной публикации: существующий Helm owner либо строго проверенный original unmanaged Secret до первого Helm-переноса. Только этот одноразовый legacy путь допускает UID/resourceVersion/data-tested JSON patch без apply и перехвата владельца. Повтор после частичного rekey сверяет protected precommit/complete key archives; произвольный credential drift не принимается.
+
+Helm values, manifests, release Secrets и `.local/helm-failures/*.json` могут содержать credentials. Не публиковать `helm get values/manifest`, `--debug`, dry-run output или сырые diagnostics. Ошибки показывают только путь к protected0600 diagnostics; история/статус CLI выводятся без notes/description. Helm history не шифрует values самостоятельно; права на Kubernetes Secrets — доступ к секретам.
+
+Если первая install завершилась `failed`, успешной ревизии для rollback ещё нет: устраните причину по protected diagnostics и явно продолжите `helm upgrade RELEASE charts/CHART --kube-context k3d-sso-remediation -n sso-remediation -f PRIVATE_VALUES --server-side=false --wait=legacy --timeout 240s --history-max 20`, сохранив values0600 в каталоге0700. Не добавлять uninstall, cleanup-on-fail, force-replace, take-ownership, rollback-on-failure для первого восстановления; не удалять Helm Secrets. `pending-*` требует проверки незавершённого Helm процесса и отдельного recovery, конкурирующие writes запрещены. Для успешного приложения используйте `make release-rollback` с проверенным номером ревизии и реальным probe. Базы и Kafka автоматически назад не откатываются. Alert acceptance восстанавливает только свою временную platform-config конфигурацию bounded explicit upgrade, допускающий завершившийся failed, но не конкурирующий pending; общая политика infra auto-rollback не ослабляется.
+
 
 ## Реальная проверка и отказ
 
@@ -94,6 +127,17 @@ Image `HEALTHCHECK` не заменяет Kubernetes probes. Gateway прове�
 ## Повторяемая приёмка
 
 `make acceptance` запускает durable real API/negative/OIDC race/events/security gates из `scripts/acceptance`; `make acceptance GATE=admin|load|trace|failure|replay|smtp-fault` запускает дополнительные реальные сценарии. CA автоматически `.local/ca.crt`, state только ignored `.local/acceptance`, Mailpit loopback28026. Точные prerequisite/sequence, локальный targetp95<500мс/error<1% и измеренная evidence — [docs/acceptance.md](docs/acceptance.md). История изменений — [CHANGELOG.md](CHANGELOG.md).
+
+### Отдельный бенчмарк регистрации
+
+```sh
+make benchmark-registration
+make benchmark-registration ARGS='--users 200 --workers 8'
+```
+
+Измеряет только настоящий `POST /api/v1/auth/register` через HTTPS gateway: Argon2, SQL-транзакция пользователя/роли/challenge/outbox. Уникальные `example.invalid` адреса, CSRF/Origin и проверка CA включены; подготовка клиентов/CSRF, подтверждение email, login и асинхронная доставка не входят в тайминг. Closed-loop генератор: `users` 1..200, `workers` 1..32 (по умолчанию 40/4), без повторов и подмены IP. Отдельно выводятся успешные регистрации/с, попытки/с, HTTP-коды, транспортные/некорректные ответы, p50/p95/p99/max успешных и всех запросов. Percentiles — nearest rank; быстрые `429` не уменьшают latency успешных регистраций.
+
+Rate limits не изменяются: 20 попыток за 10 минут на IP-бакет; local proxy/SNAT может давать несколько gateway-observed адресов одному генератору. Поэтому лимит не равен 20 попыткам на весь локальный запуск. Результат с частичным throttling — `completed_with_throttling`, не доказательство предельной capacity. Полностью ограниченный запуск — `blocked`, exit 2 и null successful latency; прочие ошибки — exit 1. JSON каждого запуска сохраняется отдельно в `.local/acceptance/registration-benchmark-<run_id>.json` (0600), без паролей, токенов и тел ответов. Созданные неподтверждённые пользователи сохраняются с префиксом `benchmark-register-<run_id>`; пользовательские данные и rate-limit counters не очищаются. Бенчмарк сериализован с maintenance через общий lock и не входит в обычный core acceptance.
 
 ## Полный интерфейс оператора
 

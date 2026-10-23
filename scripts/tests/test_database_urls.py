@@ -13,6 +13,9 @@ import env_secrets
 import manifests
 import schema_gate
 import security_material
+import helm_release
+from release_values import release_specs
+from types import SimpleNamespace
 
 
 class DatabaseCredentialURLs(unittest.TestCase):
@@ -60,7 +63,10 @@ class DatabaseCredentialURLs(unittest.TestCase):
                 (leaf / 'tls.crt').write_bytes(b'fixture certificate')
                 (leaf / 'tls.key').write_bytes(b'fixture private key')
             databases = {}
-            for resource in manifests.infrastructure(cli.PINS, state, cli.ROOT / 'observability'):
+            runtime = SimpleNamespace(ROOT=cli.ROOT, STATE=state, NS=cli.NS, CONTEXT=cli.CONTEXT, run=cli.run, kube=cli.kube)
+            images = {**cli.PINS, **{target: 'fixture/' + target for target in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend')}}
+            spec = release_specs(images, state, cli.ROOT)['platform-config']
+            for resource in helm_release.render(runtime, 'platform-config', spec):
                 name = resource['metadata']['name']
                 if resource['kind'] == 'Secret' and name in {db + '-database' for db in manifests.DBS}:
                     databases[name] = resource['data']

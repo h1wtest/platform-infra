@@ -4,6 +4,8 @@
 
 Implementation workspace: `/home/bpqvg/dev/h1wtest-remediation`. Repository-env migration and genuine Telegram evidence are published on `fix/repository-env-telegram`; synchronized primary checkouts use local `synced/repository-env-telegram` tracking that remote branch. Remote main remains the reviewed baseline below until a separately authorized integration. Public organization: https://github.com/h1wtest . No cloud or production operations occurred.
 
+Helm cutover and the registration-only benchmark use delivery branch `feat/independent-helm-releases` in platform-infra. The owner authorized commit and branch push on 2026-10-23; this does not authorize PR creation, merge, primary-checkout synchronization or deployment. The live local stand has adopted Helm ownership. Until the primary infrastructure checkout is explicitly synchronized, run lifecycle commands only from `/home/bpqvg/dev/h1wtest-remediation/platform-infra`; its old Python-only primary counterpart must not write the same Helm-owned resources. Commands and recovery policy: README section "Независимые Helm-релизы и обновления". Namespace/operator bootstrap remains explicit; no cloud or production topology was deployed.
+
 | Repository | Published main |
 |---|---|
 |platform-contracts|`f354498b360121d18f5c48d4b578ae8e004a8415`|
