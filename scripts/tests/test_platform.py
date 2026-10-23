@@ -1,0 +1,64 @@
+"""Behavior regressions; controller runs after integration, never source-text assertions."""
+import importlib.util
+import pathlib
+import tempfile
+import unittest
+import json
+import hashlib
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('platform_runtime', ROOT / 'scripts' / 'cli.py')
+platform = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(platform)
+
+
+class BootstrapBehavior(unittest.TestCase):
+    def test_bootstrap_retains_secrets_and_creates_valid_internal_certificate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            first = platform.create_secrets(state)
+            second = platform.create_secrets(state)
+            self.assertEqual(first, second)
+            self.assertNotEqual(first['identity_runtime_password'], first['identity_migration_password'])
+            self.assertNotEqual(first['profile_token'], first['admin_token'])
+            platform.run(['openssl', 'verify', '-CAfile', str(state / 'ca.crt'), '-verify_hostname', 'identity-service', str(state / 'tls.crt')])
+            platform.run(['openssl', 'verify', '-CAfile', str(state / 'ca.crt'), '-verify_hostname', 'localhost', str(state / 'tls.crt')])
+
+    def test_authenticated_backup_roundtrip_and_wrong_password_rejection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            plain = state / 'dump'; plain.write_bytes(b'PostgreSQL durable backup\x00\xff')
+            key = state / 'key'; key.write_text('test-only random passphrase\n')
+            encrypted = state / 'dump.enc'; restored = state / 'restored'
+            platform.encrypt_file(plain, encrypted, key)
+            platform.decrypt_file(encrypted, restored, key)
+            self.assertEqual(plain.read_bytes(), restored.read_bytes())
+            payload = bytearray(encrypted.read_bytes()); payload[-1] ^= 1; encrypted.write_bytes(payload)
+            with self.assertRaises(RuntimeError):
+                platform.decrypt_file(encrypted, restored, key)
+
+    def test_missing_image_lock_fails_closed_before_render(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError):
+                platform.load_images(pathlib.Path(directory))
+
+    def test_gateway_lock_requires_content_addressed_tag_matching_recorded_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            image_id = 'sha256:' + 'a' * 64
+            images = {**platform.PINS, 'gateway': 'sso-remediation/gateway:sha256-' + 'a' * 64, 'gateway_id': image_id,
+                      'gateway_base': platform.PINS['gateway'],
+                      'gateway_recipe_sha256': hashlib.sha256((ROOT / 'components/nginx/Dockerfile').read_bytes()).hexdigest()}
+            lock = state / 'images.lock.json'
+            lock.write_text(json.dumps(images))
+            self.assertEqual(platform.load_images(state)['gateway_id'], image_id)
+            for invalid in ('sso-remediation/gateway:latest', 'sso-remediation/gateway:sha256-' + 'b' * 64, platform.PINS['gateway']):
+                images['gateway'] = invalid
+                lock.write_text(json.dumps(images))
+                with self.subTest(image=invalid), self.assertRaises(RuntimeError):
+                    platform.load_images(state)
+
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,0 +1,22 @@
+rule_files:
+  - alerts.yml
+evaluation_interval: 5s
+tests:
+  - name: First persisted external delivery failure fires
+    interval: 5s
+    input_series:
+      - series: 'delivery_attempts_total{status="failed",instance="notification-worker:8005"}'
+        values: '0 0 0 0 0 0 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: DeliveryFailed
+        exp_alerts: []
+      - eval_time: 35s
+        alertname: DeliveryFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: notification-worker:8005
+              status: failed
+            exp_annotations:
+              summary: An external delivery attempt failed
