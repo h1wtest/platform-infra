@@ -1,0 +1,8 @@
+{{- range $name, $data := .Values.secrets }}
+---
+{"apiVersion":"v1","kind":"Secret","metadata":{"name":{{ $name | toJson }},"namespace":{{ $.Release.Namespace | toJson }}},"type":"Opaque","data":{{ $data | toJson }}}
+{{- end }}
+{{- range $name, $data := .Values.configMaps }}
+---
+{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":{{ $name | toJson }},"namespace":{{ $.Release.Namespace | toJson }}},"data":{{ $data | toJson }}}
+{{- end }}

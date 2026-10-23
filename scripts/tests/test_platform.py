@@ -15,7 +15,9 @@ spec.loader.exec_module(platform)
 class BootstrapBehavior(unittest.TestCase):
     def test_bootstrap_retains_secrets_and_creates_valid_internal_certificate(self):
         with tempfile.TemporaryDirectory() as directory:
-            state = pathlib.Path(directory)
+            state = pathlib.Path(directory) / 'platform-infra' / '.local'
+            for owner in ('identity-service', 'user-notification-service'):
+                (pathlib.Path(directory) / owner).mkdir()
             first = platform.create_secrets(state)
             second = platform.create_secrets(state)
             self.assertEqual(first, second)

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: platform-mailpit
+description: Independent local platform mailpit release
+type: application
+version: 0.1.0

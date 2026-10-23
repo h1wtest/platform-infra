@@ -16,6 +16,10 @@ curl --fail --silent --show-error --location --max-time 120 https://dl.k8s.io/re
 curl --fail --silent --show-error --location --max-time 30 https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl.sha256 --output "$work/kubectl.sha256"
 printf '%s  %s\n' "$(cat "$work/kubectl.sha256")" "$work/kubectl" | sha256sum --check
 install -m 0755 "$work/kubectl" "$HOME/.local/bin/kubectl"
+curl --fail --silent --show-error --location --max-time 120 https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz --output "$work/helm.tar.gz"
+printf '%s  %s\n' 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b "$work/helm.tar.gz" | sha256sum --check
+tar -xzf "$work/helm.tar.gz" -C "$work"
+install -m 0755 "$work/linux-amd64/helm" "$HOME/.local/bin/helm"
 curl --fail --silent --show-error --location --max-time 120 https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 --output "$work/k3d"
 curl --fail --silent --show-error --location --max-time 30 https://github.com/k3d-io/k3d/releases/download/v5.9.0/checksums.txt --output "$work/k3d-checksums.txt"
 # Verify the exact release asset, not a loose substring or an unchecked downloaded executable.

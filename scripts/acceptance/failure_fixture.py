@@ -5,13 +5,16 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import uuid
 from common import ROOT, STATE, run_module
+sys.path.insert(0, str(ROOT / 'scripts'))
+import env_secrets
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--state', type=Path, required=True)
 args = parser.parse_args()
-values = json.loads((ROOT / '.local/secrets.json').read_text())
+values = env_secrets.load(ROOT / '.local')
 account = json.loads(args.state.read_text())['probe']
 job_id = str(uuid.uuid4())
 # Node's maintained OpenSSL AES-GCM implementation creates exactly nonce+ciphertext+tag/AAD job UUID.

@@ -12,30 +12,20 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cli
-import manifests
 import security_material
+import helm_release
+from release_values import release_specs
+from test_helm_charts import fixture
 
 
 def broker_resources(directory):
-    state = Path(directory)
-    values = {'kafka_bootstrap_password': 'test-bootstrap-password', 'postgres_password': 'test-postgres-password', 'gateway_token': 'test-gateway-token'}
-    for database in manifests.DBS:
-        values[database + '_runtime_password'] = 'test-runtime-password'
-        values[database + '_migration_password'] = 'test-migration-password'
-    (state / 'secrets.json').write_text(json.dumps(values))
-    (state / 'ca.crt').write_text('test certificate fixture')
-    (state / 'signing.pem').write_text('test signing fixture')
-    for name in security_material.SERVICES:
-        certificate = state / 'certificates' / name
-        certificate.mkdir(parents=True)
-        (certificate / 'tls.crt').write_text('test certificate fixture')
-        (certificate / 'tls.key').write_text('test key fixture')
-    resources = {}
-    for item in manifests.infrastructure(cli.PINS, state, cli.ROOT / 'observability'):
-        resources[(item['kind'], item['metadata']['name'])] = item
-        if item['kind'] == 'StatefulSet' and item['metadata']['name'] == 'redpanda':
-            return resources
-    raise AssertionError('Broker StatefulSet not rendered')
+    runtime, images = fixture(directory)
+    specs = release_specs(images, runtime.STATE, runtime.ROOT)
+    return {(item['kind'], item['metadata']['name']): item
+            for release in ('platform-config', 'redpanda')
+            for item in helm_release.render(runtime, release, specs[release])}
+
+
 
 
 class BrokerProvisioning(unittest.TestCase):

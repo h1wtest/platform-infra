@@ -2,20 +2,24 @@
 
 ## Current state
 
-Working trees: `/home/bpqvg/dev/h1wtest-remediation`; branch `feat/platform-remediation`. Original clean main checkouts were fast-forwarded after reviewed merges. Public organization: https://github.com/h1wtest . No cloud or production operations occurred.
+Implementation workspace: `/home/bpqvg/dev/h1wtest-remediation`. The owner authorized integrating all prepared changes into each repository's `main` and synchronizing clean primary checkouts on 2026-10-23. Public organization: https://github.com/h1wtest . This authorization does not include deployment or cloud/production operations. Integration receipts: [identity PR3](https://github.com/h1wtest/identity-service/pull/3), [notifications PR3](https://github.com/h1wtest/user-notification-service/pull/3), [infrastructure PR2](https://github.com/h1wtest/platform-infra/pull/2); their current GitHub state and `origin/main` are authoritative.
 
-| Repository | Published main |
+Infrastructure PR2 includes both `fix/repository-env-telegram` and `feat/independent-helm-releases`: canonical owner env, genuine Telegram evidence, independent Helm releases and the registration-only benchmark. The live local stand has already adopted Helm ownership. Primary checkouts under `/home/bpqvg/dev/h1wtest` are synchronized to `main` only after their integration succeeds, using clean-worktree checks and fast-forward updates. Until the primary infrastructure checkout contains this Helm cutover, run lifecycle commands only from `/home/bpqvg/dev/h1wtest-remediation/platform-infra`; an old Python-only checkout must not write the same Helm-owned resources. Commands and recovery policy: README section "Независимые Helm-релизы и обновления". Namespace/operator bootstrap remains explicit; no cloud or production topology was deployed.
+
+The following SHAs are the historical main baseline **before** the integration above, not a claim about current remote heads:
+
+| Repository | Pre-integration main |
 |---|---|
-|platform-contracts|`524a6d86248517cd9e4ec4a88e11ac22c2ec99ca`|
-|frontend|`317ddc7d75319e3505b99ed8234f71dd12f8da3a`|
-|user-notification-service|`644ba45fab4c4550de5428fe02edda279f16a8de`|
-|identity-service|`8092d4328e717d5669067ad70ee9c4311ad3a3f2`|
+|platform-contracts|`f354498b360121d18f5c48d4b578ae8e004a8415`|
+|frontend|`96ee3c3e08011a98296ad71b009e6f4117f59dc0`|
+|user-notification-service|`e5c706e4d4ed6f121b9ae420387e872a9e3b1825`|
+|identity-service|`e19ad30af2538b776e5e2f6a1ad97ea142013530`|
 |admin-cloud-service|`2c479d1aa11a71c08b4789e40d5d0eae67b67d34`|
-|platform-infra|[PR1](https://github.com/h1wtest/platform-infra/pull/1), local remediation published; final integration follows the owner-approved checks below|
+|platform-infra|`602e05fa9b8b4163146c38c9471845ef8f1396a1` (merged PR1)|
 
 All six repositories already existed; no new empty repository or fictitious deployment was created. The independently deployed Go admin/audit command lives in `user-notification-service/cmd/admin`; `admin-cloud-service` documents that ownership rather than claiming a second executable.
 
-Local UI: `https://localhost:8448`. Verify using `.local/ca.crt` explicitly. The OS trust store was not modified. Administrator credentials, signing material and service keys remain in ignored private `.local`; real MFA is required. Never paste them into Git, tickets or logs.
+Local UI: `https://localhost:8448`. Verify using `.local/ca.crt` explicitly. The OS trust store was not modified. Canonical credentials/private keys belong to ignored mode0600 `platform-infra/.env`, `identity-service/.env` and `user-notification-service/.env`; admin email/password live in identity env and Telegram credentials in Go env. `.local` retains derived PEM mounts and protected historical recovery archives, never active secrets.json. Legacy import preserves credentials/key bytes without rotation; missing owner env after initialization must fail closed. Back up all owner env privately; frontend receives no secrets. Real MFA is required. Never paste credentials into Git, tickets or logs.
 
 Current acceptance scope is local development only. The user explicitly excluded whole-host automatic recovery and external-hosting requirements from current completion criteria. Historical failed host reports below remain evidence, not current acceptance blockers; no new host faults or cloud work are authorized.
 
@@ -56,13 +60,13 @@ Vulnerability image/dependency scanning has been deleted by explicit owner instr
 
 CNPG permissions are now actually bounded: the retained original ClusterRole has only node/catalog reads and named own-webhook access; operand mutation uses a Role in sso-remediation. Real impersonated authorization permits owned secrets/exec/services and denies all three in kube-system/default. Operator namespace PKI/cache/leader permissions remain necessary. A peer review found and corrected local pull policy and webhook-secret renewal gaps. Live operator and all three injected instance managers use the patched image; original PVCs retained, all three PostgreSQL instances Ready. Repeat installation and encrypted four-database backup/disposable content-matching restore passed.
 
-Grafana now ships complete signed, checksum-pinned Prometheus/Tempo plugins and disables startup downloads/updates. Actual retained-data dashboard plots and both datasource health checks passed; a fresh disposable emptyDir instance also queried real Prometheus samples and Tempo successfully without plugin downloads. Tempo's real cross-service trace was observed after its package patch. Telegram bot token is absent in stored settings, environment and runtime Secret; real delivery remains a credential prerequisite.
+Grafana now ships complete signed, checksum-pinned Prometheus/Tempo plugins and disables startup downloads/updates. Actual retained-data dashboard plots and both datasource health checks passed; a fresh disposable emptyDir instance also queried real Prometheus samples and Tempo successfully without plugin downloads. Tempo's real cross-service trace was observed after its package patch. Telegram credentials were subsequently supplied by the owner: real private-chat Start/webhook linking, settings and an exact-login-event Kafka/worker delivery passed; private evidence is `.local/acceptance/telegram.json`.
 
 Earlier infrastructure CI runs genuinely failed the former vulnerability gate. Those results are not relabeled; new workflows no longer include that owner-excluded gate. Current required checks must pass before integration. Existing Kubernetes1.35.5 nodes are retained; no node upgrade, host fault or external deployment is part of this local task.
 
 ## Other boundaries
 
-- Genuine Telegram acceptance requires a real bot, private chat and reachable authenticated webhook; unavailable without these, no mock accepted.
+- Genuine Telegram linking/login-alert delivery passed with a real bot/private chat and secret-authenticated webhook. Current webhook ingress is a temporary ngrok tunnel exposing only the webhook route; unattended tunnel availability is not certified. Bot API acceptance is not a human-read receipt.
 - No AWS/production, independent-host/zone failure, PITR, OIDC certification or long-term RPO guarantee.
 - Backups are authenticated encrypted logical snapshots. An active systemd user manager/host is required for the installed hourly timer; off-host durability is not established.
 

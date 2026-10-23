@@ -1,0 +1,35 @@
+{{- $v := .Values -}}
+{{- $annotations := dict -}}
+{{- if $v.credentialRevision }}{{ $_ := set $annotations "sso.local/credential-revision" $v.credentialRevision }}{{ end -}}
+{{- if $v.configRevision }}{{ $_ := set $annotations "sso.local/config-revision" $v.configRevision }}{{ end -}}
+{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":{{ $v.name | toJson }},"namespace":{{ .Release.Namespace | toJson }}},"spec":{
+{{ if not $v.autoscaling }}"replicas":{{ $v.replicas }},{{ end }}
+"minReadySeconds":5,"progressDeadlineSeconds":180,"selector":{"matchLabels":{"app":{{ $v.name | toJson }}}},
+"strategy":{"type":"Recreate"},
+"template":{"metadata":{"labels":{"app":{{ $v.name | toJson }}},"annotations":{{ $annotations | toJson }}},"spec":{
+"serviceAccountName":{{ $v.name | toJson }},"automountServiceAccountToken":false,"terminationGracePeriodSeconds":40,
+"securityContext":{"runAsNonRoot":true,"runAsUser":{{ $v.uid }},"runAsGroup":{{ $v.uid }},"fsGroup":{{ $v.uid }},"seccompProfile":{"type":"RuntimeDefault"}},
+"containers":[{"name":{{ $v.name | toJson }},"image":{{ required "image required" $v.image | toJson }},"imagePullPolicy":"IfNotPresent",
+"ports":[{{ range $index, $port := $v.ports }}{{ if $index }},{{ end }}{"containerPort":{{ $port }}}{{ end }}],
+"env":{{ $v.env | toJson }},"command":{{ $v.command | toJson }},"args":{{ $v.args | toJson }},
+"resources":{"requests":{"cpu":{{ $v.cpu | toJson }},"memory":{{ $v.memory | toJson }}},"limits":{"cpu":{{ $v.cpuLimit | toJson }},"memory":{{ $v.memoryLimit | toJson }}}},
+"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}},
+{{ if $v.readinessPath }}
+"readinessProbe":{"httpGet":{"path":{{ $v.readinessPath | toJson }},"port":{{ default (index $v.ports 0) $v.probePort }},"scheme":{{ ternary "HTTPS" "HTTP" $v.tls | toJson }}},"periodSeconds":5,"timeoutSeconds":3,"failureThreshold":3},
+"livenessProbe":{"httpGet":{"path":{{ $v.livePath | toJson }},"port":{{ default (index $v.ports 0) $v.probePort }},"scheme":{{ ternary "HTTPS" "HTTP" $v.tls | toJson }}},"periodSeconds":15,"timeoutSeconds":3,"failureThreshold":4},
+"startupProbe":{"httpGet":{"path":{{ $v.readinessPath | toJson }},"port":{{ default (index $v.ports 0) $v.probePort }},"scheme":{{ ternary "HTTPS" "HTTP" $v.tls | toJson }}},"periodSeconds":5,"failureThreshold":60},
+{{ else if eq $v.name "otel-collector" }}
+"readinessProbe":{"httpGet":{"path":"/","port":13133},"periodSeconds":5},"livenessProbe":{"httpGet":{"path":"/","port":13133},"periodSeconds":15},
+{{ end }}
+"volumeMounts":[{"name":"tmp","mountPath":"/tmp"}{{ range $v.mounts }},{{ . | toJson }}{{ end }}{{ if $v.persistent }},{"name":"data","mountPath":{{ if eq $v.name "grafana" }}"/var/lib/grafana"{{ else }}"/data"{{ end }}}{{ if eq $v.name "tempo" }},{"name":"data","mountPath":"/var/tempo"}{{ end }}{{ end }}]}],
+"volumes":[{"name":"tmp","emptyDir":{"sizeLimit":"128Mi"}}{{ range $v.volumes }},{{ . | toJson }}{{ end }}{{ if $v.persistent }},{"name":"data","persistentVolumeClaim":{"claimName":{{ $v.name | toJson }}}}{{ end }}],
+"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app":{{ $v.name | toJson }}}}}]
+}}}}
+---
+{"apiVersion":"v1","kind":"ServiceAccount","metadata":{"name":{{ $v.name | toJson }},"namespace":{{ .Release.Namespace | toJson }}},"automountServiceAccountToken":false}
+---
+{"apiVersion":"v1","kind":"Service","metadata":{"name":{{ $v.name | toJson }},"namespace":{{ .Release.Namespace | toJson }}},"spec":{"selector":{"app":{{ $v.name | toJson }}},"ports":{{ $v.servicePorts | toJson }}}}
+{{ if $v.persistent }}
+---
+{"apiVersion":"v1","kind":"PersistentVolumeClaim","metadata":{"name":{{ $v.name | toJson }},"namespace":{{ .Release.Namespace | toJson }},"annotations":{"helm.sh/resource-policy":"keep"}},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":{{ default "2Gi" $v.storage | toJson }}}}}}
+{{ end }}

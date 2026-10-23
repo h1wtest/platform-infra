@@ -5,6 +5,7 @@ import time
 import uuid
 import cli
 import manifests
+import env_secrets
 
 
 def verify():
@@ -12,15 +13,16 @@ def verify():
     database = 'schema_gate_' + suffix
     name = 'schema-gate-' + suffix
     image = cli.load_images()['identity']
-    values = json.loads((cli.STATE / 'secrets.json').read_text())
+    values = env_secrets.load(cli.STATE)
     cli.dbsql(f'CREATE DATABASE {database} OWNER identity_migration; GRANT CONNECT ON DATABASE {database} TO identity_runtime;')
     forward = None
     try:
         cli.dbsql('REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT ALL ON SCHEMA public TO identity_migration; CREATE EXTENSION IF NOT EXISTS "uuid-ossp"; ALTER DEFAULT PRIVILEGES FOR ROLE identity_migration IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO identity_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE identity_migration IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO identity_runtime;', database)
-        runtime = f"postgresql://identity_runtime:{values['identity_runtime_password']}@postgres-rw.sso-remediation.svc:5432/{database}?sslmode=verify-full&sslrootcert=/run/postgres/ca.crt"
-        migration = f"postgresql://identity_migration:{values['identity_migration_password']}@postgres-rw.sso-remediation.svc:5432/{database}?sslmode=verify-full&sslrootcert=/run/postgres/ca.crt"
+        runtime = manifests.database_url('identity_runtime', values['identity_runtime_password'], database)
+        migration = manifests.database_url('identity_migration', values['identity_migration_password'], database)
         cli.apply([manifests.secret(name, {'runtime': runtime, 'migration': migration})])
-        deployment = next(r for r in manifests.applications(cli.load_images()) if r['kind'] == 'Deployment' and r['metadata']['name'] == 'identity-service')
+        from helm_release import service_deployment
+        deployment = service_deployment(cli, 'identity-service', cli.load_images())
         deployment['metadata']['name'] = name
         deployment['spec']['replicas'] = 1
         spec = deployment['spec']['template']['spec']

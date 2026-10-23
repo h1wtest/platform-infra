@@ -1,8 +1,54 @@
 # Local remediation acceptance
 
-Current policy: image/dependency vulnerability scanners are removed by explicit owner instruction and must not run. Their historical results below remain history, not current acceptance gates. Local business behavior, secrets, RBAC/TLS, configuration/schema validation, builds and tests remain required. Host automatic recovery/external hosting remain excluded; real Telegram delivery requires missing credentials.
+Current policy: image/dependency vulnerability scanners are removed by explicit owner instruction and must not run. Their historical results below remain history, not current acceptance gates. Local business behavior, secrets, RBAC/TLS, configuration/schema validation, builds and tests remain required. Host automatic recovery/external hosting remain excluded. Genuine Telegram linking and login-alert delivery subsequently passed; evidence below supersedes historical missing-credential notes.
 
 After scanner deletion,85 remaining Python tests passed6.267s (one opt-in broker test skipped); removed six scanner-only tests are not counted as passing tests. Five changed workflows passed actionlint and YAML parsing. Real schema validation, running-stand check and login/profile/logout smoke passed without vulnerability scanning. Secret/configuration checks and all existing security patches remain active.
+
+## Registration-only benchmark — 2026-10-23
+
+`make benchmark-registration ARGS='--users 40 --workers 4'` exercised the actual strict-TLS gateway and registration endpoint: 40 HTTP201, zero429, zero other errors in1.219422s; 32.802 registrations/s over that short run. Successful p50/p95/p99:106.704/181.785/188.156ms. Private report `registration-benchmark-a549be2036c74714a6b58cd2daf163d0.json`. Read-only SQL verified40owned users,0verified,40identity.user_registered and40notification.email_verification outbox rows.
+
+The subsequent200attempt/8worker run produced60HTTP201 and140HTTP429, zero other errors in2.010040s;29.850successful registrations/s and99.500attempts/s over the whole run. Successful p50/p95/p99:101.430/202.661/237.566ms; all-attempt percentiles are kept separate. Private report `registration-benchmark-4b7aee4ee8e34c889d9e010a571b95f7.json`. Read-only SQL verified60owned users,0verified and60rows of each of the two authoritative outbox event types. Real login/profile/logout passed afterward.
+
+No limits were disabled/reset and no forwarding headers were forged. After the first run, read-only SQL observed five current register IP buckets with attempts5/5/8/9/13 (total40), despite one local generator. The gateway supplies its observed remote address; the exact proxy/SNAT mapping was not independently traced. Therefore the source policy20attempts/10min per bucket is not a global20attempt limit for this local path. Earlier reports' wording "One source IP" described the generator, not a verified single gateway-observed bucket; the permanent report wording was corrected. Final8attempt/4worker smoke observed8HTTP429,0successes, outcome blocked, successful latency null and exit2, retaining its own report `registration-benchmark-a00ea34e0c334ba9a48c82e903eb9421.json`.
+
+Timing includes real POST, HTTPS, CSRF validation, Argon2 and SQL transaction/outbox; excludes CSRF client setup, email verification/delivery and login. Created unverified disposable users are intentionally retained; no database or limit cleanup. These are short closed-loop local burst measurements, not sustained capacity or a production SLO. Three deterministic accounting regressions separate fast throttles/invalid201/transport errors from successful registrations. The first full-suite invocation omitted the documented tool PATH and failed6Helm renders; with `~/.local/bin` supplied,177tests passed29.194s with one opt-in skip. No service/deployment configuration was changed.
+
+
+## Independent Helm delivery
+
+The local stand adopted fifteen distinct Helm releases from six real charts. Adoption validated all inventories first and changed metadata only; the original Deployment, StatefulSet, Service, PVC and CNPG Cluster UIDs remained identical before and after full installation. Existing CA, owner credentials and data were retained. Actual `make build; make up; make check` plus real login/profile/logout passed608.58s. No cloud/EC2/control-plane HA or remote CI execution is implied.
+
+Final integrated Python suite ran174tests in26.951s with one opt-in broker test skipped. Fifteen configured chart lint/render runs passed; the exact chart-rendered CNPG resource validated against the pinned CRD,98core resources passed strict kubeconform. IaC evaluation covered99resources/2376checks with zero HIGH/CRITICAL configuration findings; four current component recipes also passed. This is configuration validation, not image/dependency vulnerability scanning. Scanning the whole developer directory instead encountered ignored historical upstream artifacts and cannot substitute for scanning actual rendered resources; CI uses the actual chart render plus tracked component recipes.
+
+Real Profile rolling acceptance passed232.11s:885authenticated profile requests with the same live session, zero failures across successful update, failed readiness, business-gate rejection and restoration. A distinct immutable packaging image ran the genuine Profile executable; no changed application semantics are claimed. Success replaced workload pod UIDs/images and left sibling Deployment templates unchanged. Failed readiness created an actual new failed Helm revision, observed a new non-ready candidate pod, retained the original ready endpoints throughout sampling, then created a deployed recovery revision. A deliberately rejecting post-readiness business probe made the release command fail and restored the prior image. The original image was restored at completion. Private evidence: `.local/acceptance/rolling.json` and per-release records.
+
+Two earlier acceptance failures remain archived: the first included historical migration Job pods in its workload selection; the second exposed that Helm legacy readiness could return while an old non-terminating Running pod still existed. The corrected workload filter requires a controlling ReplicaSet, and production deploy/rollback now additionally wait for full `kubectl rollout status`; private `rollout-diagnostic.json` retains the observed early-return state. These failures were not relabeled successful.
+
+Independent read-only chart/lifecycle review found and resolved competing alert ConfigMap writes, false-positive failed-rollout proof, canonical local image inconsistency, rollback image-selection persistence, rekey locking and pre-Helm/interrupted rekey publication. Scoped re-review reported no remaining important findings by inspection. Populated legacy rekey itself was not executed against current nonlegacy data; protected archive/retry behavior is covered by deterministic regressions, not claimed as live legacy acceptance.
+After the reviewed fixes, real `make alerts; make schema-gate; core; admin; make check` passed116.54s. Prometheus observed the injected alert firing and its Helm-owned configuration was restored; the identity empty-schema process returned live200/ready503, then ready200 after actual migration. Core verified strict TLS, registration/real Mailpit email/Kafka profile creation, profile/session ownership and revocation, OIDC signature/PKCE/nonce/state/code/refresh races, MFA/recovery/password flows, logout, negative authorization/Origin/CSRF/JSON boundaries, duplicate/poison Kafka processing with actual SMTP, broker ACLs, per-owner DB privileges and untrusted-network denial. Administrator MFA/search/ban/unban/audit/delivery authorization also passed. No browser interaction was needed for this infrastructure-only change; HTTP UI entry/discovery returned200 with explicit Linux CA verification.
+Explicit selected update → `release-rollback` → stale saved-selection reconciliation → full `make up; make check; probe` passed275.63s. The selected original image persisted through recovery and the subsequent full lifecycle; private `rollback.json` records the actual revision/image proof. After alert restoration and full up,60Helm-owned objects had no competing kubectl last-applied metadata, and live platform Secret bytes matched canonical owner env. Final repeated174-test suite passed26.052s with one skip; actionlint passed. Temporary smoke scripts were removed, original failure/evidence records retained. No push, PR, merge or remote workflow run occurred for this Helm branch.
+
+
+## Repository environment migration
+
+Canonical credentials and all private PEM/backup-key bytes were migrated into the three owning repository `.env` files with mode0600 and Git ignore verification. A private comparison proved equality with both the former saved manifest and actual running `platform-secrets`; every private key and public certificate remained byte-identical. The active legacy JSON was removed only after comparison, and repeat initialization returned the same credentials. No rotation, account reset or PVC replacement occurred.
+
+The initial integrated Python suite ran119tests in9.272s:118passed, one opt-in broker smoke skipped. Tests cover literal/escaped dotenv parsing, exact ownership, Telegram edits, interrupted legacy publication/deletion, missing-owner fail-closed behavior and derived-key restoration. A pre-migration four-database backup's authenticated source snapshots decrypted successfully using the canonical `.env` backup key, preserving its exact trailing newline.
+
+Actual `make build; make up; make check` completed321.86s with existing data retained. Every API/worker/gateway/Grafana Deployment had the canonical credential revision and all desired replicas updated/available; runtime Secret values matched owner env. Full strict-TLS core plus administrator MFA/ban/unban/audit acceptance passed33.41s. A real disposable PostgreSQL database and both roles authenticated a configured password containing quotes, URL-special characters, a backslash and newline; original resources were untouched and disposable resources removed3.63s. Live read-only preflight accepted unchanged credentials/Telegram edits and refused a changed DB password without applying any mutation. No real Telegram delivery is claimed until a bot token is supplied.
+
+After independent review corrections, the final suite ran129tests in10.375s:128passed, one opt-in broker test skipped. Regression cases include quoted DB credentials, URI encoding, immutable persisted-credential preflight, explicit unused legacy recovery and completed rekey followed by preflight. A disposable-process fault injection removing final rekey runtime publication made the focused regression fail as intended. A new authenticated four-database backup and disposable row-content-matching restore completed48.18s (`20261023T124933Z-bfb6f965`). Independent read-only review reported no remaining Critical/Important findings; no vulnerability scanning was performed.
+
+Final normal guarded `make up; make check` plus real login/profile/logout probe passed153.34s after the SQL/DSN/preflight/rekey corrections. Existing Kubernetes nodes and all retained data remained unchanged; Telegram remains optional/unconfigured pending user input in the Go owner `.env`.
+
+## Real Telegram acceptance
+
+The owner supplied the bot token in `/home/bpqvg/dev/h1wtest/user-notification-service/.env`; only that token was imported into the active Go owner env, without importing stale unrelated credentials. Actual `getMe` succeeded; normal `make up; make check` applied the configuration183.95s. A temporary ngrok HTTPS tunnel exposes only the exact Telegram webhook through a loopback relay with strict upstream CA verification and inspection disabled: root/API paths404, wrong webhook secret403, authenticated malformed JSON400. No synthetic Telegram update or direct test send substituted for the business path.
+
+The user opened the application-generated one-use link and pressed Start in a genuine private Telegram chat. Verification passed2.52s: authenticated webhook bound the account, notification settings persisted, and an actual subsequent login's session ID correlated to its authoritative outbox event and exactly one Telegram delivery job with status `sent` and nonnull delivery time. The real Bot API accepted the worker request; persisted evidence recorded one attempt and no reported webhook error. Private account/chat/link/event/job evidence remains only in ignored `.local/acceptance/telegram.json`; no bot secret is published. Provider acceptance is not a human-read receipt. The webhook tunnel is temporary, not external-hosting or unattended tunnel-recovery certification.
+
+
 
 ## Re-run
 
@@ -25,7 +71,9 @@ make persistence
 make chaos TARGET=identity-service PROBE='sh scripts/acceptance/probe.sh'
 ```
 
-Individual gates: `e2e`, `negative`, `race`, `events`, `network`, `broker-acl`, `db-privileges`, `tls`. `ARGS='--mailpit http://127.0.0.1:28026 --state-directory /private/custom/path'` controls loopback mail/state, and `--ca` controls explicit trust file. Environment `ACCEPTANCE_DIRECTORY`, `ACCEPTANCE_MAILPIT`, `ACCEPTANCE_BASE` supported; dispatcher restricts origin to the isolated `https://localhost:8448` stand. `probe.sh` uses ignored state and explicit CA automatically. `admin` reads bootstrap admin credentials privately from `.local/secrets.json`, completes actual MFA and stores its TOTP secret only in ignored state.
+Individual gates: `e2e`, `negative`, `race`, `events`, `network`, `broker-acl`, `db-privileges`, `tls`. `ARGS='--mailpit http://127.0.0.1:28026 --state-directory /private/custom/path'` controls loopback mail/state, and `--ca` controls explicit trust file. Environment `ACCEPTANCE_DIRECTORY`, `ACCEPTANCE_MAILPIT`, `ACCEPTANCE_BASE` supported; dispatcher restricts origin to the isolated `https://localhost:8448` stand. `probe.sh` uses ignored state and explicit CA automatically. `admin` reads bootstrap credentials privately from canonical `identity-service/.env` (`ADMIN_EMAIL`, `ADMIN_PASSWORD`) through the owner env loader, completes actual MFA and stores its TOTP secret only in ignored acceptance state.
+
+Credential configuration uses ignored mode0600 `platform-infra/.env`, `identity-service/.env` and `user-notification-service/.env`, never an active `.local/secrets.json`. Real Telegram token/webhook secret must be set only in `user-notification-service/.env`; empty optional bot token means unavailable, not successful delivery. After editing owner env, normal `make up` reapplies Secrets and changes credential-consumer pod-template revisions so running services reload environment values. Frontend has no secret input. Historical reports below describe the storage and observed prerequisites at the time; they are not instructions to restore legacy active configuration.
 
 For a previously enrolled administrator, preserve/provide its own mode0600 `admin-state.json`; missing state is an explicit prerequisite error, never a server MFA reset or DB secret extraction. Admin/replay share an owner-state flock, wait for the next real30s TOTP counter (bounded32s), atomically reserve it before request and never retry rejected factors. This prevents legitimate replay protection from being mistaken for application failure in sequential acceptance.
 
@@ -130,13 +178,13 @@ done
 
 Do not run an automatic StatefulSet rollout into unresolved quorum failure. First pass the isolated boot contract and capture diagnostics. For the observed asymmetric client failure, a single targeted process/pod replacement can reset DNS/RPC state while preserving all broker logs; it is not forced partition recovery. Keep the two other brokers and all PVCs intact. No supported DNS/RPC-reset signal was established; `reset_leaders` is unrelated and is not a remedy. The source reconnect path re-resolves DNS on new connections, but uses a process-local Seastar resolver, not glibc/OpenSSL.
 
-1. Apply **only** the broker ConfigMap and StatefulSet rendered from current source, temporarily setting StatefulSet `updateStrategy` to `OnDelete`. This prevents an automatic second replacement while health is unresolved. Do not apply unrelated images or delete a PVC. Runtime central policy must be getter-verified on the controller; `.bootstrap.yaml` alone deliberately does not overwrite existing cache.
+1. Inspect the broker ConfigMap and StatefulSet from the owning `platform-config` and `redpanda` Helm releases. Temporarily set StatefulSet `updateStrategy` to `OnDelete` with the explicit maintenance patch below. Do not run normal Helm/up reconciliation during this fenced recovery: it would restore the declared strategy. Do not apply unrelated images or delete a PVC. Runtime central policy must be getter-verified on the controller; `.bootstrap.yaml` alone deliberately does not overwrite existing cache.
 2. For this captured case, controller0was intact and broker1had stale outbound status. Replace **only** `redpanda-1` gracefully using the commands below. Require a new UID with the same PVC, exact new startup fsync flag, `developer_mode:false`, no ignored node/cluster properties, same controller history and fresh bidirectional peer status. If it does not rejoin, stop: do not delete broker0or cascade restarts.
 3. With a recovered0+1majority and diagnostics showing intact replica histories, replace broker2only if still required. After health is fully green, replace broker0last to remove the remaining dev-mode process. Between replacements require all3nodes, no down nodes and0leaderless/under-replicated partitions, except the explicitly recorded single recovery step from the pre-existing outage. Restore the normal RollingUpdate strategy only after all3have the new revision and full health. Never present TCP Ready as that gate.
 
 ```sh
 k patch statefulset redpanda --type merge -p '{"spec":{"updateStrategy":{"type":"OnDelete","rollingUpdate":null}}}'
-# Apply the current rendered broker-only ConfigMap/StatefulSet with the same OnDelete strategy.
+# Do not run Helm/up while this temporary OnDelete recovery fence is active.
 k get pod redpanda-1 -o json
 k delete pod redpanda-1 --wait=true --timeout=120s
 k wait --for=condition=Ready pod/redpanda-1 --timeout=300s
@@ -145,11 +193,7 @@ k exec redpanda-0 -- rpk cluster health --format json
 # Run the per-node peer/controller/NTP checks above before deciding on another replacement.
 ```
 
-The comment is a mandatory operator-reviewed render step, not permission to run `make up` against an unhealthy cluster. Exact source-render apply from `platform-infra` (the operator must already have selected the approved recovery step):
-
-```sh
-uv run --no-project python -c 'import sys; sys.path.insert(0,"scripts"); import cli, manifests; items=[x for x in manifests.infrastructure(cli.load_images(),cli.STATE,cli.ROOT/"observability") if (x["kind"],x["metadata"]["name"]) in (("ConfigMap","redpanda-config"),("StatefulSet","redpanda"))]; [x["spec"].update(updateStrategy={"type":"OnDelete"}) for x in items if x["kind"]=="StatefulSet"]; cli.apply(items)'
-```
+The previous Python persistent-resource generator no longer exists. Inspect private rendered output from the installed Helm releases when planning an explicitly authorized recovery; never feed a second independent generator into `kubectl apply`. The commands here are exceptional, temporary maintenance mutations, not an alternate deployment owner. The retained broker configuration already belongs to `platform-config`; inspect it without printing credentials. Restore the declared strategy only after the recovery gates below pass.
 
 Set and verify **only** the retained cluster policy, without creating topics/users or replaying messages, before the selected restart:
 
@@ -177,7 +221,7 @@ Docker/Ubuntu integration was checked from inside Ubuntu, unrelated `dsh-hindsig
 
 ## External boundaries
 
-Telegram Bot API credentials/chat/public webhook absent: external gate open, no mocked delivery accepted. AWS/cloud not deployed or queried. No production acceptance, PITR or independent-host/zone HA claim. Remote publication into h1wtest and real CI runs are explicitly authorized by the current request and tracked separately from local runtime results; remaining image findings are not waived by publication.
+Genuine Telegram bot/private-chat/webhook linking and login-alert delivery are now exercised as recorded above; earlier absent-credential observations remain historical. AWS/cloud were not deployed or queried. No production acceptance, PITR or independent-host/zone HA claim. Publication and remote CI are separate from local runtime evidence; historical image findings are not clean-security claims.
 
 ## Local security and operator closure
 

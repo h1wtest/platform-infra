@@ -1,26 +1,25 @@
 """Per-purpose encryption keys and private TLS identities; existing credentials are never rotated."""
 import base64
-import json
 import os
 import secrets
 
 SERVICES = ('identity-service', 'profile-service', 'notification-service', 'notification-worker', 'admin-audit-service', 'gateway', 'redpanda')
 
 
-def ensure(state, values, run):
+def ensure(state, values, run, *, initialize=False):
     if 'encryption_key' in values:
         raise RuntimeError('Legacy shared encryption_key detected: startup refused. Explicit backup and transactional per-owner rekey are required before deleting the legacy key; never auto-generate replacements for existing ciphertext.')
-    changed = False
     for key in ('mfa_encryption_key', 'delivery_encryption_key', 'profile_quarantine_key', 'notification_quarantine_key', 'admin_quarantine_key'):
         if key not in values:
-            values[key] = base64.b64encode(secrets.token_bytes(32)).decode(); changed = True
+            if not initialize:
+                raise RuntimeError('Missing existing encryption key: ' + key)
+            values[key] = base64.b64encode(secrets.token_bytes(32)).decode()
     for role in ('bootstrap', 'identity', 'profile', 'notification', 'admin'):
         key = 'kafka_' + role + '_password'
         if key not in values:
-            values[key] = secrets.token_urlsafe(32); changed = True
-    if changed:
-        from private_files import atomic_json
-        atomic_json(state / 'secrets.json', values)
+            if not initialize:
+                raise RuntimeError('Missing existing broker password: ' + key)
+            values[key] = secrets.token_urlsafe(32)
     mask = os.umask(0o077)
     try:
         for service in SERVICES:
@@ -30,6 +29,8 @@ def ensure(state, values, run):
                 if not (directory / 'tls.key').exists():
                     raise RuntimeError('Missing existing private service key: ' + service)
                 continue
+            if not initialize:
+                raise RuntimeError('Missing existing service certificate: ' + service)
             names = [service, service + '.sso-remediation.svc', service + '.sso-remediation.svc.cluster.local']
             if service == 'gateway': names += ['localhost']
             if service == 'redpanda':
