@@ -1,0 +1,53 @@
+name: Infrastructure verification
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan tracked repository and history for secrets
+        run: docker run --rm -v "$PWD:/repo:ro" docker.io/zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f git /repo --redact --no-banner
+      - name: Install pinned uv with verified digest
+        run: |
+          curl --fail --silent --show-error --location --max-time 120 https://github.com/astral-sh/uv/releases/download/0.13.5/uv-x86_64-unknown-linux-gnu.tar.gz --output /tmp/uv.tar.gz
+          echo 'f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f  /tmp/uv.tar.gz' | sha256sum --check
+          tar -xzf /tmp/uv.tar.gz -C /tmp
+          sudo install /tmp/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv
+      - name: Compile scripts and run behavior regressions
+        run: |
+          uv run --no-project --python 3.12.10 python -m compileall -q scripts
+          uv run --no-project --python 3.12.10 python -m unittest discover -s scripts/tests -p 'test_*.py'
+      - name: Render actual hardened deployment resources
+        run: |
+          umask 077
+          uv run --no-project --python 3.12.10 python scripts/render.py --output /tmp/resources.json
+          test -s /tmp/ca.crt
+          chmod 644 /tmp/ca.crt
+      - name: Validate monitoring configuration with pinned binary image
+        run: |
+          docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 check rules /etc/platform/alerts.yml
+          docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" --workdir /etc/platform docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 test rules /etc/platform/alerts-test.yml
+          docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" -v /tmp:/run/tls:ro docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 check config /etc/platform/prometheus.yml
+          docker run --rm -v "$PWD/observability:/etc/platform:ro" docker.io/otel/opentelemetry-collector-contrib:0.163.2@sha256:7f22d2a6748110ffb6a59bc0df448bccbf501cdb667d610ede4c61d3863d5849 validate --config=/etc/platform/otel.yml
+          docker run --rm -v "$PWD/observability:/etc/platform:ro" docker.io/grafana/tempo:3.1.1@sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044 -config.file=/etc/platform/tempo.yml -config.verify=true
+      - name: Scan IaC security configuration
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" docker.io/aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c config --exit-code 1 --severity HIGH,CRITICAL /repo
+          uv run --no-project --python 3.12.10 python scripts/scan_config.py /tmp/resources.json
+      - name: Validate generated Kubernetes config without contacting cluster
+        run: |
+          umask 077
+          uv run --no-project --python 3.12.10 --with jsonschema==4.25.1 --with PyYAML==6.0.3 python scripts/validate_manifests.py /tmp/resources.json
+          docker run --rm -v /tmp:/resources:ro ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.35.0 /resources/core-resources.json
+      - name: Build patched runtime images without publishing
+        run: |
+          uv run --no-project --python 3.12.10 python -c 'import sys; sys.path.insert(0, "scripts"); import cli; [cli.build_component(name) for name in cli.PATCHED_COMPONENTS]'
+      - name: Remove generated credentials
+        if: always()
+        run: rm -f /tmp/resources.json /tmp/core-resources.json /tmp/ca.crt

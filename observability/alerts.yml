@@ -1,0 +1,25 @@
+groups:
+  - name: platform
+    rules:
+      - alert: ServiceUnavailable
+        expr: up{job="platform"} == 0
+        for: 30s
+        labels: {severity: critical}
+        annotations: {summary: "Application scrape/readiness unavailable"}
+      - alert: OutboxDeliveryDelayed
+        expr: outbox_oldest_age_seconds > 60
+        for: 30s
+        labels: {severity: warning}
+        annotations: {summary: "Durable identity event backlog exceeds 60 seconds"}
+      - alert: DeliveryFailed
+        expr: increase(delivery_attempts_total{status="failed"}[5m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "An external delivery attempt failed"}
+      - alert: ServiceNotReady
+        expr: service_ready == 0
+        for: 30s
+        labels: {severity: critical}
+      - alert: BusinessHTTPFailures
+        expr: sum by (job) (rate(http_requests_total{status=~"5.."}[2m])) / clamp_min(sum by (job) (rate(http_requests_total[2m])), 0.001) > 0.05
+        for: 60s
+        labels: {severity: warning}
