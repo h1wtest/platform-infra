@@ -16,11 +16,14 @@ RUN go work edit -replace=github.com/getkin/kin-openapi=github.com/getkin/kin-op
       -ldflags='-X main.version=13.2.4-h1w1 -X main.commit=af4a33e3786594ad72f72d97e6744010330c2977 -X main.buildBranch=h1w-security-rebuild' \
       -o /out/grafana ./pkg/cmd/grafana && \
     printf '%s\n' '13.2.4-h1w1' > /out/grafana-version
+COPY healthcheck.go /src/healthcheck.go
+RUN GOWORK=off go build -trimpath -buildvcs=false -o /out/grafana-healthcheck /src/healthcheck.go
 
 # Export alongside a distributed rebuild for AGPL corresponding-source access.
 FROM scratch AS source-output
 COPY --from=backend /src/grafana /grafana
 COPY --from=backend /go/pkg/mod /dependencies
+COPY --from=backend /src/healthcheck.go /healthcheck.go
 
 # DSA-6572-1 removes compromised trust anchors. Generate the bundle through the
 # real Debian package installer, then retain its unmodified control/md5 metadata
@@ -40,7 +43,10 @@ LABEL org.opencontainers.image.source="https://github.com/h1wtest/platform-infra
       io.h1wtest.security.kin-openapi="0.149.0"
 COPY --from=backend /out/grafana /usr/share/grafana/bin/grafana
 COPY --from=backend /out/grafana-version /.grafana-version
+COPY --from=backend --chown=472:472 --chmod=0555 /out/grafana-healthcheck /usr/local/bin/grafana-healthcheck
 COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=certificates /package-control/control /var/lib/dpkg/status.d/ca-certificates
 COPY --from=certificates /package-control/md5sums /var/lib/dpkg/status.d/ca-certificates.md5sums
 USER 472
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+  CMD ["/usr/local/bin/grafana-healthcheck"]

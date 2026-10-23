@@ -233,16 +233,29 @@ def load_images(state=STATE):
 
 
 def cluster():
+    from cluster_identity import guard
     clusters = json.loads(run(['k3d', 'cluster', 'list', '-o', 'json']).stdout)
-    if not any(item['name'] == CLUSTER for item in clusters):
-        run(['k3d', 'cluster', 'create', CLUSTER, '--image', load_images()['k3s'], '--servers', '3', '--agents', '0', '--port', '8448:443@loadbalancer', '--port', '8089:80@loadbalancer', '--k3s-arg', '--disable=traefik@server:*', '--wait', '--timeout', '240s'], timeout=300)
-    kube('get', 'nodes')
+    created = not any(item['name'] == CLUSTER for item in clusters)
+    if created:
+        if (STATE / 'cluster-identity.json').exists():
+            raise RuntimeError('Retained cluster identity exists but cluster is missing; refuse recreation over existing identity')
+        run(['k3d', 'cluster', 'create', CLUSTER, '--subnet', 'auto', '--image', load_images()['k3s'], '--servers', '3', '--agents', '0', '--port', '8448:443@loadbalancer', '--port', '8089:80@loadbalancer', '--k3s-arg', '--disable=traefik@server:*', '--wait', '--timeout', '240s'], timeout=300)
+        kube('wait', '--for=condition=Ready', 'nodes', '--all', '--timeout=120s', timeout=130)
+    guard(sys.modules[__name__], initialize=created)
     nodes = json.loads(kube('get', 'nodes', '-o', 'json').stdout)['items']
     expected = 'v1.35.9+k3s1'
     actual = sorted({node['status']['nodeInfo']['kubeletVersion'] for node in nodes})
     if actual != [expected]:
         print('OPEN MAINTENANCE GATE: existing Kubernetes nodes ' + ', '.join(actual) + ' differ from configured ' + expected + '; existing data/cluster not upgraded or deleted implicitly.', file=sys.stderr)
 
+
+
+def start_cluster(timeout='180s', k3d='k3d'):
+    from cluster_identity import guard
+    guard(sys.modules[__name__], live=False)
+    run([k3d, 'cluster', 'start', CLUSTER, '--wait', '--timeout', timeout], timeout=240)
+    kube('wait', '--for=condition=Ready', 'nodes', '--all', '--timeout=120s', timeout=130)
+    guard(sys.modules[__name__])
 
 def install_operator(images):
     content = (STATE / 'cnpg-operator.yaml').read_bytes()
@@ -631,7 +644,7 @@ def alerts():
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for command in ('secrets', 'build', 'up', 'check', 'status', 'stop', 'start', 'bootstrap-admin', 'backup', 'schedule-backups', 'schema-gate', 'persistence', 'repair-certificates', 'alerts', 'mailpit', 'prometheus', 'grafana', 'tempo'):
+    for command in ('secrets', 'build', 'up', 'check', 'status', 'stop', 'start', 'cluster-identity', 'bootstrap-admin', 'backup', 'schedule-backups', 'schema-gate', 'persistence', 'repair-certificates', 'alerts', 'mailpit', 'prometheus', 'grafana', 'tempo'):
         commands.add_parser(command)
 
     def backup_path(value):
@@ -666,7 +679,12 @@ def main():
     elif args.command == 'up': up()
     elif args.command == 'check': check()
     elif args.command == 'status': run(['kubectl', '--context', CONTEXT, '-n', NS, 'get', 'pods,pvc,svc,hpa,pdb', '-o', 'wide'], capture=False)
-    elif args.command in ('stop', 'start'): run(['k3d', 'cluster', args.command, CLUSTER])
+    elif args.command == 'stop': run(['k3d', 'cluster', 'stop', CLUSTER])
+    elif args.command == 'start': start_cluster()
+    elif args.command == 'cluster-identity':
+        from cluster_identity import guard
+        guard(sys.modules[__name__], initialize=True)
+        print('PASS original Kubernetes/etcd peer identity matches static Docker reservations; private baseline retained')
     elif args.command == 'bootstrap-admin': bootstrap_admin()
     elif args.command == 'backup':
         from fault_lifecycle import exclusive

@@ -42,6 +42,26 @@ Counts above are package/binary finding rows, not falsely inflated unique CVE to
 
 Actual service acceptance may pass while security release gate remains blocked. Publication into reviewed main is now user-authorized; it does not turn a failing vulnerability gate into a clean release. No cloud deployment or implicit cluster/PVC replacement is authorized. Acceptance now requires **zero findings at every severity**; the earlier HIGH/CRITICAL criterion is strengthened, not weakened. No risk acceptance or waiver has been granted.
 
+## Complete-severity controller and remote evidence
+
+The controller subsequently scanned every selected infrastructure artifact without severity filtering. These are package/binary finding rows, not unique CVEs; the K3s row is the configured1.35.9 artifact, not a claim that existing1.35.5 nodes were upgraded.
+
+| Artifact | Evaluated packages | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+|---|---:|---:|---:|---:|---:|---:|
+|K3s1.35.9|504|1|46|73|10|3|
+|PostgreSQL18.6 standard trixie|148|1|62|124|152|5|
+|Redpanda26.2.5|116|0|48|93|155|3|
+|Mailpit1.32.0|70|0|0|0|0|1|
+|Actually patched gateway|70|0|0|0|0|0|
+|Prometheus3.15.1|439|0|0|0|0|2|
+|Official Grafana13.2.4 distroless-slim|533|0|6|2|0|2|
+|Tempo3.1.1|395|0|0|0|0|2|
+|Collector0.163.2|1088|0|0|0|0|1|
+
+Actual infrastructure GitHub run [39922891681](https://github.com/h1wtest/platform-infra/actions/runs/39922891681) passed source/unit/render/monitoring/secret/IaC/schema gates and reached the same immutable-image all-severity gate, which correctly failed. Gateway provenance records its patched archive identity and retained70-package inventory; the upstream base digest alone is not the patched runtime. Application repositories fixed their actual remote findings (Rust protobuf/RSA/PEM/JWT/OTel and Go x/sys), then passed all-severity image gates on reviewed commits. No application-clean result closes these infrastructure rows.
+
+The official CNPG1.30.1 operator manifest was also separately inspected by the IaC scanner. Its `cnpg-manager` ClusterRole triggered KSV-0041(secret management), KSV-0053(pods/exec), KSV-0056(service routing management), and KSV-0114(webhook configuration patching). These are real privileged operator capabilities, not proof of an exploit or permission granted to applications. They were not removed or silently excluded to claim a clean cluster. The [official installation guide](https://cloudnative-pg.io/docs/current/installation_upgrade/) documents a watch-namespace installation option; reducing its actual RBAC and proving backup/failover/reconciliation remains intact requires a separately verified least-privilege operator configuration. A watch filter by itself is not proof that cluster-wide RBAC was narrowed.
+
 ## Primary-source follow-up — 2026-10-23
 
 This investigation read every finding row in the five saved reports (`postgres.json`, `redpanda.json`, `candidate-grafana-distroless-slim.json`, `candidate-k3s-patch.json`, `k3s.json`), grouping by ID/package/version/fixed version. The old scans requested **only HIGH/CRITICAL**. Consequently their LOW/MEDIUM/UNKNOWN counts are **unknown**, not zero. `scripts/scan_images.py` now retains all severities, prints every row/count and fails **any vulnerability**, including LOW/MEDIUM/UNKNOWN. Controller subsequently executed the new broker candidate full-severity scan (measured below); other components still require full-severity scan evidence. This worker performed no builds, scans, cluster mutations or pin changes; controller owns execution and acceptance.

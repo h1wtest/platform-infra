@@ -26,6 +26,8 @@ class CommandBoundaryTests(unittest.TestCase):
             (['check', '--backup', 'backup'], '--backup'),
             (['status', '--target', 'postgres'], '--target'),
             (['backup', '--probe', 'probe'], '--probe'),
+            (['cluster-identity', '--initialize'], '--initialize'),
+            (['start', '--reset'], '--reset'),
         ]
         for arguments, diagnostic in cases:
             with self.subTest(arguments=arguments):

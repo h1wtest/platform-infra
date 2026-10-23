@@ -340,12 +340,21 @@ class HostFaultTests(unittest.TestCase):
         self.assertIn('8s', arguments)
         self.assertIn('ACCEPTANCE_BASE=https://localhost:8448', arguments)
 
-    def test_cluster_start_program_preserves_home_go_bin_fallback(self):
-        with patch('shutil.which', return_value=None), patch.object(Path, 'home', return_value=Path('/owned-home')), patch('subprocess.call', return_value=0) as call, patch.object(sys, 'argv', ['-c', 'sso-remediation', '180s']):
-            with self.assertRaises(SystemExit) as exit_result:
-                exec(host.CLUSTER_START_PROGRAM, {})
-        self.assertEqual(exit_result.exception.code, 0)
-        self.assertEqual(call.call_args.args[0], [str(Path('/owned-home/go/bin/k3d')), 'cluster', 'start', 'sso-remediation', '--wait', '--timeout', '180s'])
+    def test_identity_or_wsl_integration_failure_blocks_before_backup_or_fault(self):
+        fault = host.HostFault(host.REPOSITORY)
+        operations = []
+
+        def platform(arguments, timeout):
+            operations.append(arguments)
+            raise RuntimeError('Docker integration unavailable or peer identity unsafe')
+
+        with patch.object(fault, 'platform', side_effect=platform), patch.object(fault, 'helper', side_effect=AssertionError('readiness/fixtures must not run')), patch.object(fault, 'command', side_effect=AssertionError('host mutation must not run')):
+            with self.assertRaisesRegex(RuntimeError, 'integration'):
+                fault.run_fault()
+        self.assertEqual(operations, [['scripts/cluster_identity.py', 'verify']])
+        self.assertFalse(fault.evidence['injection_attempted'])
+        self.assertFalse(fault.fixture_owned)
+        self.assertEqual(fault.stage, 'network_identity_preflight')
 
     def test_explicit_cluster_start_retries_known_cgroup_admission_failure(self):
         fault = host.HostFault(host.REPOSITORY)

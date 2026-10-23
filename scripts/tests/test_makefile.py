@@ -17,6 +17,7 @@ class MakeDispatchTests(unittest.TestCase):
             'bootstrap': ['secrets'], 'build': ['build'], 'up': ['up'],
             'check': ['check'], 'status': ['status'], 'stop': ['stop'],
             'start': ['start'], 'bootstrap-admin': ['bootstrap-admin'],
+            'cluster-identity': ['cluster-identity'],
             'schedule-backups': ['schedule-backups'], 'backup': ['backup'],
             'restore-verify': ['restore-verify', '--backup', '.local/backups/complete'],
             'schema-gate': ['schema-gate'], 'repair-certificates': ['repair-certificates'],

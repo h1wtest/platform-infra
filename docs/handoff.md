@@ -1,52 +1,67 @@
-# Local remediation handoff
+# Local remediation and release handoff
 
-## State and location
+## Current state
 
-Approved specification: `docs/specs/2026-10-23-platform-remediation-design.md`. Changes are in isolated sibling worktrees at `/home/bpqvg/dev/h1wtest-remediation`, branch `feat/platform-remediation` in all six repositories. No commits, remote push, merge, cloud resources or production operations were performed.
+Working trees: `/home/bpqvg/dev/h1wtest-remediation`; branch `feat/platform-remediation`. Original clean main checkouts were fast-forwarded after reviewed merges. Public organization: https://github.com/h1wtest . No cloud or production operations occurred.
 
-Local UI: `https://localhost:8448`. Explicit CA: `.local/ca.crt`; system trust was not modified. Admin credentials and purpose/service keys remain in ignored mode0600 `.local/secrets.json`; administrative access requires real MFA. Do not paste these values into Git, tickets or logs.
-
-Architecture: Rust identity; independent Go profile, notification API, delivery worker and admin/audit commands; React frontend; canonical event/internal HTTP contracts. `admin-cloud-service` documents cutover to the actual Go admin command, not a fictitious extra deployment.
-
-## Executed local verification
-
-Exact commands, measured results and corrected failures: `docs/acceptance.md`. Permanent rerunnable harness: `scripts/acceptance`; `make acceptance` is not a discovery-only test.
-
-Exercised strict TLS; registration and actual Mailpit email; Kafka-created profiles; sessions/ownership/revocation/ban across services; MFA/recovery replay rejection; password reset/change; standards OIDC consumer, RSA/JWKS/PKCE/nonce/state/refresh races; administrator MFA/search/ban/unban/audit; actual SMTP outage/retry/recovery; duplicate/poison Kafka records; exact owned corrected replay; database privileges, broker ACLs and untrusted network denial; primary replacement with known committed value; encrypted backup/restore content comparison; timer-driven backup; actual delivery alert and a five-service correlated trace.
-
-Final durable core after clean Mailpit/nginx rollout: **PASS, 21.44s**. Final Grafana distroless-slim UI loaded its provisioned dashboard, Prometheus/Tempo datasource health returned OK, and corrected sampled-lag panels displayed real series plus sample age. These are functional checks, not a CVE waiver.
-
-| Local measurement | Result |
+| Repository | Published main |
 |---|---|
-| Authenticated profile reads, eight workers/15s |10,174 successes, zero errors; p95 16.142ms|
-| Login/profile/email delivery, ten unique users/two workers |10 successes, zero errors; group lag0; p95 login89.429ms/profile10.763ms/delivery517.696ms|
-| Encrypted logical backup / verified disposable restore |4DB;20.66s /24.59s; source row-content hashes matched|
-| Primary replacement |75.879s evidence/77.95s wall; known value preserved; new UID/primary; all3Ready|
-| Identity replacement / broker replacement |13.33s /22.38s; real business probes; broker subsequently verified zero under-replicated/leaderless partitions|
-| Actual timer-driven backup |05:06:11→05:06:32 local; Result=success, ExecMainStatus0|
+|platform-contracts|`524a6d86248517cd9e4ec4a88e11ac22c2ec99ca`|
+|frontend|`317ddc7d75319e3505b99ed8234f71dd12f8da3a`|
+|user-notification-service|`644ba45fab4c4550de5428fe02edda279f16a8de`|
+|identity-service|`8092d4328e717d5669067ad70ee9c4311ad3a3f2`|
+|admin-cloud-service|`2c479d1aa11a71c08b4789e40d5d0eae67b67d34`|
+|platform-infra|[PR1](https://github.com/h1wtest/platform-infra/pull/1), security gate remains failing; not merged|
 
-These are bounded local acceptance measurements, not production capacity, host/zone HA, PITR or long-term RPO guarantees. Earlier failures, including initial timer lock collision and faulty chaos selector, remain documented rather than relabeled successful.
+All six repositories already existed; no new empty repository or fictitious deployment was created. The independently deployed Go admin/audit command lives in `user-notification-service/cmd/admin`; `admin-cloud-service` documents that ownership rather than claiming a second executable.
 
-Application checks: strict Rust Clippy, real SQL/Kafka regressions and six RSA-format/rotation checks; Go1.26.10 vet/race/build plus actual disposable CI broker lifecycle; frontend lint/format/28 tests/typecheck/build and actual desktop/mobile/browser flows; contract generation/compatibility behavior tests. Meaningful application source/binary dependency scans passed. Empty scratch/zero-file scanner results were explicitly rejected until package inventories were available. Workflow syntax checked locally; remote GitHub jobs were not run.
+Local UI: `https://localhost:8448`. Verify using `.local/ca.crt` explicitly. The OS trust store was not modified. Administrator credentials, signing material and service keys remain in ignored private `.local`; real MFA is required. Never paste them into Git, tickets or logs.
 
-## Security acceptance is BLOCKED
+## Executed application and remote checks
 
-**The whole platform is not zero-HIGH, fully accepted or production-ready.** `docs/security-images.md` lists actual infrastructure scan reports and supported candidates. Clean Mailpit/nginx patches were deployed and reverified. PostgreSQL, Redpanda, Grafana and K3s still require patched supported upstream artifacts. No CVE suppressions, package-inventory deletion, severity weakening or inferred risk waiver were used.
+Permanent actual acceptance harness: `scripts/acceptance`; detailed commands and observations: `docs/acceptance.md`.
 
-Future bootstrap pins K3s1.35.9, reducing reported findings but not reaching zero. Existing1.35.5 nodes were not implicitly upgraded/deleted; data-preserving control-plane maintenance is a separate open gate. A source pin is not runtime upgrade proof.
+Exercised real registration/Mailpit verification/Kafka profiles; session ownership/revocation/logout/ban; MFA and recovery replay; password changes/reset; browser standards OIDC with RS256/JWKS/PKCE/nonce/state/refresh; administration; SMTP outage/retry/recovery; duplicate/poison/replay; database and broker privileges; untrusted NetworkPolicy denial; encrypted four-database backup/restore hashes; replacement faults; real delivery alert and five-service trace.
 
-## External prerequisites
+Final identity dependency changes passed strict Clippy, meaningful `cargo audit --deny warnings`, actual HTTP OTLP export/W3C regression and50 real PostgreSQL/TLS-Kafka/signing/OIDC/MFA/relay/readiness regressions. Maintained dependencies remove vulnerable RSA/protobuf and unmaintained PEM parsing; JWT10.4 and OpenTelemetry SDK0.32.1 address the later all-severity image findings. Remote identity push/PR runs `39922372881` / `39922377866` passed, including final immutable-image scanning; post-merge main workflow was dispatched.
 
-- Telegram: genuine bot credentials, private test chat and reachable authenticated HTTPS webhook. Channel is honestly unavailable without them; mocked delivery was not accepted.
-- Remote CI: authorized publication, accessible immutable contracts commit and `PLATFORM_CONTRACTS_REVISION`/dispatch input. Implementation approval does not authorize push or repository settings changes.
-- AWS/production, independent host/zone failover, PITR and OIDC certification were not verified and are not claimed.
+Go commands passed real PostgreSQL/Kafka race tests, vet, four builds and source-provenance checks. x/sys0.44 addresses the actual final-image finding. All four final command images passed the remote all-severity gate. Main push/dispatch runs `39919978983` / `39919982057` passed.
 
-## Running the stand
+Frontend35 behavioral tests, lint/format/typecheck/build and dependency audit passed. Exact musl/zlib security revisions were installed; full final-image gate passed remotely. Main push/dispatch runs `39917144305` / `39917147318` passed. Real desktop/mobile login/profile/security/nonadmin-denial/logout and signed OIDC/refresh were exercised. Browser UI used an isolated certificate exception; strict TLS API checks remain separate evidence.
 
-From `platform-infra`: `make bootstrap`, `make build`, `make up`, `make check`. Operator port-forwards: `make mailpit`, `make prometheus`, `make grafana`, `make tempo`. Trust the CA explicitly; do not globally install an unreviewed root.
+Contracts generation, strict Go/Rust HTTP codecs, complete immutable-v1 compatibility, tests and complete source artifact passed. Main push/dispatch runs `39919640075` / `39919642448` passed. Service CI pins the approved immutable contracts commit `665c565bd0a00f30027b429129b22d91f99ef6b0`; later main changes only update verified Node24 workflow action pins.
 
-`make backup` / `make restore-verify BACKUP=<specific path>` create authenticated encrypted logical snapshots and compare disposable restored content. The installed hourly systemd user timer needs an active host/user manager; one successful trigger does not prove perpetual execution or off-host durability.
+## Whole Docker-host failure: automatic recovery FAILED; manual recovery verified
 
-Fault commands serialize destructive operations, require a genuine business probe, verify controller-owned replacement UID/desired Ready replicas and broker health where applicable. Bootstrap/migrations/faults/restore verification do not reset existing data. Historical failed Jobs remain diagnostic, not current-service readiness failures.
+Two explicitly approved abrupt Docker Desktop WSL VM failures were executed. Both remain **FAIL**, not successful autonomous recovery:
 
-Temporary verification containers and parent throwaway scripts/keys were removed after permanent harness integration. Owned verification browser tabs and temporary port-forwards were closed. The working Kubernetes stand, ignored local credentials, backups, durable acceptance state and hourly backup timer were retained. Start operator forwards explicitly when needed.
+1. Docker restart-policy startup left k3d nodes stopped with runtime `cgroup.procs` EBUSY. Existing-container startup and controlled broker process recovery were required.
+2. Docker Desktop lost Ubuntu WSL integration (`Wsl/Service/0x8007274c`). A supported Docker Desktop restart restored integration, but dynamically reassigned cluster container IPs disagreed with retained etcd peer identities.
+
+No further whole-host faults are authorized by this handoff. Do not reset/purge Docker, unregister WSL distributions, recreate the cluster, delete PVCs/topics/logs, or force etcd/broker recovery to make acceptance pass.
+
+Manual recovery retained every existing container and volume. Original Kubernetes node addresses were restored as explicit static Docker IPAM reservations; all three nodes, API/etcd, PostgreSQL, applications and broker quorum recovered. Stale outbound broker channels were restored by one-at-a-time retained-PVC pod replacement with bidirectional peer checks. No leaderless or under-replicated partitions remained.
+
+After recovery, run `98e7f41d18244ac7b30bc23a33a6dc3a` verified the **same pre-failure session**, committed profile/database marker, six acknowledged RF3 Kafka partition markers and46 sampled historical records at their original coordinates/hashes. Consumer groups were not modified. This proves those values survived; it is not all-record, physical-power-loss or independent-host HA certification. Owned DB/session/profile fixtures were cleaned; bounded24h Kafka acceptance records/topic metadata remain.
+
+Evidence remains private in `.local/acceptance`: both failed host reports, correlated business evidence and broker diagnostics. `make check` subsequently passed; SSO returned HTTPS200 with explicit CA. Docker/Ubuntu integration and unrelated `dsh-hindsight` were running.
+
+## Security release remains BLOCKED
+
+**The entire platform is not all-findings-clean or production-ready.** `docs/security-images.md` retains exact infrastructure findings and primary advisories. The gateway is genuinely patched and scanned with70 packages/zero findings; no severity filters, CVE ignores or inventory deletion are used in final image gates.
+
+Supported PostgreSQL/Redpanda/K3s images retain genuine unresolved findings. The optional Grafana backend/CA rebuild fixes its patchable issues but retains a module-level advisory for an OpenPGP package absent from the compiled graph; literal Trivy all-findings acceptance is still not claimed. Package-aware govulncheck evidence is not a local suppression. Official CNPG operator cluster privileges also require explicit treatment; scanning only application resources does not certify operator RBAC.
+
+Infrastructure remote CI actually ran: the first source-IaC failure was corrected by explicitly retaining Grafana UID472; the subsequent run reached immutable image scanning and failed on remaining real findings. Do not merge by weakening this gate. Existing Kubernetes nodes1.35.5 were not implicitly upgraded; configured bootstrap1.35.9 does not prove runtime maintenance or zero vulnerabilities.
+
+## Other boundaries
+
+- Genuine Telegram acceptance requires a real bot, private chat and reachable authenticated webhook; unavailable without these, no mock accepted.
+- No AWS/production, independent-host/zone failure, PITR, OIDC certification or long-term RPO guarantee.
+- Backups are authenticated encrypted logical snapshots. An active systemd user manager/host is required for the installed hourly timer; off-host durability is not established.
+
+## Operator commands
+
+Use `make bootstrap`, `make build`, `make up`, `make check` from `platform-infra`. Start loopback operator forwards explicitly with `make mailpit`, `make prometheus`, `make grafana`, `make tempo`. `make restore-verify BACKUP=<specific complete path>` restores only unique disposable databases and compares source content. Missing/malformed arguments fail before cluster mutation.
+
+Fault/rekey commands are maintenance actions, not health checks. Do not repeat whole-host injection after the observed integration failures. Preserve diagnostic failed Jobs and original failure reports instead of relabeling them successful.

@@ -23,7 +23,7 @@ BASE = 'https://localhost:8448'
 TIMER = 'sso-remediation-backup.timer'
 CONTAINERS = ['k3d-sso-remediation-server-' + str(i) for i in range(3)] + ['k3d-sso-remediation-serverlb', 'dsh-hindsight']
 # Invoke the supported existing-cluster operation directly; never up/build/migrate.
-CLUSTER_START_PROGRAM = 'import pathlib,shutil,subprocess,sys;k3d=shutil.which("k3d") or str(pathlib.Path.home()/"go/bin/k3d");raise SystemExit(subprocess.call([k3d,"cluster","start",sys.argv[1],"--wait","--timeout",sys.argv[2]]))'
+CLUSTER_START_PROGRAM = 'import pathlib,shutil,sys;sys.path.insert(0,"scripts");import cli;k3d=shutil.which("k3d") or str(pathlib.Path.home()/"go/bin/k3d");cli.start_cluster(timeout=sys.argv[2],k3d=k3d)'
 
 
 def now():
@@ -213,6 +213,7 @@ class HostFault:
                     if result.returncode == 0:
                         after = self.inventory() if deadline - time.monotonic() > 20 else {}
                         if set(after) == set(self.before) and all(not previous['running'] or after[name]['running'] for name, previous in self.before.items()):
+                            self.platform(['scripts/cluster_identity.py', 'verify'], min(60, max(4, deadline - time.monotonic())))
                             readiness = json.loads((self.root / '.local/acceptance/host-fault-readiness.json').read_text())
                             if readiness['run_id'] != self.run_id:
                                 raise RuntimeError('Readiness evidence does not belong to current host-fault run')
@@ -243,6 +244,9 @@ class HostFault:
         self.wsl(['systemctl', '--user', 'is-active', '--quiet', TIMER])
 
     def run_fault(self):
+        self.stage = 'network_identity_preflight'
+        # WSL Docker access also proves Ubuntu/Desktop integration before backup or injection.
+        self.platform(['scripts/cluster_identity.py', 'verify'], 60)
         self.stage = 'baseline_readiness'
         self.helper('readiness')
         if not self.observe('baseline'):

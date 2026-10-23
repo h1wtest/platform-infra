@@ -1,7 +1,7 @@
 PYTHON ?= uv run --no-project python
 PLATFORM = $(PYTHON) scripts/cli.py
 shell_quote = '$(subst ','"'"',$(1))'
-.PHONY: bootstrap build up check status stop start bootstrap-admin schedule-backups backup restore-verify schema-gate repair-certificates rekey chaos persistence alerts mailpit prometheus grafana tempo test acceptance host-fault
+.PHONY: bootstrap build up check status stop start cluster-identity bootstrap-admin schedule-backups backup restore-verify schema-gate repair-certificates rekey chaos persistence alerts mailpit prometheus grafana tempo test acceptance host-fault
 bootstrap:
 	$(PLATFORM) secrets
 build:
@@ -16,6 +16,8 @@ stop:
 	$(PLATFORM) stop
 start:
 	$(PLATFORM) start
+cluster-identity:
+	$(PLATFORM) cluster-identity
 bootstrap-admin:
 	$(PLATFORM) bootstrap-admin
 schedule-backups:
