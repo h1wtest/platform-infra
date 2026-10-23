@@ -1,5 +1,9 @@
 # Local remediation acceptance
 
+Current policy: image/dependency vulnerability scanners are removed by explicit owner instruction and must not run. Their historical results below remain history, not current acceptance gates. Local business behavior, secrets, RBAC/TLS, configuration/schema validation, builds and tests remain required. Host automatic recovery/external hosting remain excluded; real Telegram delivery requires missing credentials.
+
+After scanner deletion,85 remaining Python tests passed6.267s (one opt-in broker test skipped); removed six scanner-only tests are not counted as passing tests. Five changed workflows passed actionlint and YAML parsing. Real schema validation, running-stand check and login/profile/logout smoke passed without vulnerability scanning. Secret/configuration checks and all existing security patches remain active.
+
 ## Re-run
 
 Run from `platform-infra`, after `make up`, with loopback port-forwards in separate terminals: `make mailpit`, `make prometheus`, `make tempo`. Never production/cloud. Requirements: uv, Python3.12+, OpenSSL, kubectl; the encrypted terminal-failure fixture additionally uses Node/OpenSSL crypto. All HTTP acceptance verifies TLS strictly against `.local/ca.crt`; no skip-verification fallback.

@@ -45,9 +45,9 @@ jobs:
           umask 077
           uv run --no-project --python 3.12.10 --with jsonschema==4.25.1 --with PyYAML==6.0.3 python scripts/validate_manifests.py /tmp/resources.json
           docker run --rm -v /tmp:/resources:ro ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.35.0 /resources/core-resources.json
-      - name: Scan immutable infrastructure images
+      - name: Build patched runtime images without publishing
         run: |
-          uv run --no-project --python 3.12.10 python scripts/scan_images.py
+          uv run --no-project --python 3.12.10 python -c 'import sys; sys.path.insert(0, "scripts"); import cli; [cli.build_component(name) for name in cli.PATCHED_COMPONENTS]'
       - name: Remove generated credentials
         if: always()
         run: rm -f /tmp/resources.json /tmp/core-resources.json /tmp/ca.crt

@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task.
 
+**Owner scope update:** image/dependency vulnerability scanning is removed entirely and must not run again. Earlier scan tasks below are completed historical investigation, not continuing acceptance criteria. Preserve patches, secrets/IaC/schema checks and behavioral verification. Finish current CI/publication without the excluded gate; Telegram remains credential-blocked.
+
+**Scanner removal execution:** delete dependency/image scanner steps from five verification workflows, retain secret/configuration/functional/build gates; remove infra scan_images/image_archive and their six dedicated tests; update existing active docs and mark old reports historical; validate workflows/tests/runtime, peer-review and publish per-repository PRs. No vulnerability scanning may execute during this work. No patch or data rollback.
+
 **Goal:** Close reachable local image-security and operator-permission defects, establish real Telegram prerequisites, and publish only verified infrastructure changes.
 
 **Architecture:** Preserve existing Rust/Go/Kafka/PostgreSQL ownership and existing retained k3d cluster. Keep upstream-supported artifacts and exact inventories; bound CNPG operand permissions to sso-remediation while retaining narrowly required cluster resources and webhook management. Parent owns lifecycle integration, runtime execution and release decisions.
@@ -11,7 +15,7 @@
 ## Global Constraints
 
 - Host automatic recovery and external hosting are excluded by the user. No host faults, Docker/WSL restart, cluster recreation, destructive storage action or unrequested Kubernetes upgrade.
-- Retain all-severity vulnerability gate, package metadata and original failed evidence. No ignores, severity filters or fictitious clean status.
+- Vulnerability scanning and all-severity gates are removed by explicit owner instruction; retained historical reports do not imply current assessment or require reruns.
 - No unstable Debian sid migration or organization-owned downstream distribution without an explicit support decision.
 - Reuse isolated feat/platform-remediation worktree. No direct main pushes or merge with failing criteria.
 - Credentials remain private; report Telegram presence booleans only. No real Telegram delivery claim without real bot/chat/flow.

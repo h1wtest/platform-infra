@@ -2,6 +2,7 @@
 
 ## 2026-10-23 — isolated platform remediation
 
+- Removed image/dependency vulnerability scanners and their CI gates throughout the ecosystem by explicit owner instruction. Deleted scanner-only archive helpers/tests; preserved genuine package/module fixes, content-addressed builds, secrets/IaC/schema checks, TLS/RBAC and behavioral acceptance. Historical reports are no longer release criteria; removal is not a clean-security claim.
 - Narrowed the authenticated CNPG operator's operand permissions to the application namespace, preserving only required cluster reads and named webhook updates. Verified real cross-namespace denial, existing-instance reconciliation, and encrypted four-database backup/disposable restore. No broad RBAC fallback or deleted PVCs.
 - Added missing CNPG image scan coverage and genuine source/security rebuild of both shipped instance-manager architectures; fixed all39 observed operator findings with supported Go/module/CA updates and truthful provenance.
 - Integrated content-addressed patched Grafana/Tempo/operator build inputs, import and exact-image archive scanning; recipe/dependency/healthcheck changes invalidate stale locks. Added bounded real distroless health probes, including explicit certificate-verified CNPG readiness.

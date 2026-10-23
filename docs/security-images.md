@@ -1,6 +1,6 @@
-# Immutable infrastructure vulnerability gate — 2026-10-23
+# Historical infrastructure security investigation — superseded policy
 
-**Gate remains OPEN.** Real Trivy0.76.1 remote registry linux/amd64 scans evaluated OS/Go inventories. User's clarified **ALL findings** criterion now makes every reported vulnerability fatal, including LOW/MEDIUM/UNKNOWN; zero-HIGH alone is insufficient. No ignore rules, `--ignore-unfixed`, package-database deletion, scanner severity weakening or service removal used. Report JSON remains protected locally under `.local/image-scans`; these are measured findings, not proof all CVEs are exploitable in this configuration.
+**Archived evidence only.** The owner explicitly removed image/dependency vulnerability scanning and its acceptance gate on2026-10-23. Do not run or reinstate scanners from this historical record. Earlier observations below describe past executions and former criteria; they are not current blockers or a claim of vulnerability absence. Preserve already implemented fixes, raw private evidence and functional/access-control verification.
 
 ## Previously measured HIGH/CRITICAL-free patches — not all-severity acceptance
 
@@ -107,19 +107,6 @@ Authenticated public GHCR manifest requests confirmed18.6-standard-trixie still 
 
 **Additional package-aware verification (controller exercised):** pinned official `govulncheck1.9.0` scanned the exact rebuilt Grafana binary against the full official vulnerability database. It reported zero affected calls and zero vulnerable imported packages, while listing three unused-module advisories (GO-2026-5932 and two legacy AWS S3 crypto advisories). This supports package-level reachability evidence; it does not suppress Trivy's module-level finding or satisfy literal zero-findings acceptance. Source commit `e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5` supports Go1.26 and [binary symbol analysis](https://github.com/golang/vuln/blob/e672cbe8fbc8c76e28fcb6db0efd9ce354e0dac5/cmd/govulncheck/doc.go). Offline extraction can retain the exact binary/package-symbol inventory; a stripped binary's module-only fallback must never be treated as proof of package absence.
 
-Controller commands, after coordinating Docker-host outage work (from platform-infra):
-
-```sh
-docker buildx build --platform linux/amd64 --load -t h1wtest/grafana:13.2.4-h1w1 components/grafana
-docker buildx build --platform linux/amd64 --target source-output --output type=local,dest=.local/grafana-corresponding-source components/grafana
-docker image save --output .local/grafana-13.2.4-h1w1.tar h1wtest/grafana:13.2.4-h1w1
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache -v "$PWD/.local/trivy-cache:/cache" -v "$PWD/.local:/input:ro" docker.io/aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c image --input /input/grafana-13.2.4-h1w1.tar --cache-dir /cache --scanners vuln --format json
-docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache -v "$PWD/.local/trivy-cache:/cache" docker.io/aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c image --image-src remote --platform linux/amd64 --cache-dir /cache --scanners vuln --format json docker.io/redpandadata/redpanda:v26.2.6@sha256:8b1076e0d61bfceb66594dc01536427ce0b529f8ead35fdab9763ab6085891ce
-uv run --no-project python -m unittest discover -s scripts/tests -p 'test_scan_images.py'
-uv run --no-project python scripts/scan_images.py
-```
-
-Persist the two candidate JSON stdout streams securely as separate candidate evidence, inspect every severity, and reject **any finding** for these standalone investigation commands; the regular scanner implements that fatal all-severity gate. Do not interpret standalone Trivy default exit0 as acceptance. Publish an actual registry digest and update pins only after controller acceptance; a local tag/image ID is not a registry digest.
 
 ### K3s: complete residual route and genuine blocker
 
