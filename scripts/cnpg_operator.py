@@ -15,6 +15,7 @@ import copy
 import hashlib
 import json
 import re
+import time
 
 UPSTREAM_SHA256 = '37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb'
 UPSTREAM_IMAGE = 'ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1'
@@ -295,3 +296,79 @@ def install(api, images):
     # with authenticated release deployment fields rather than replace them.
     api.run([*prefix, 'apply', '--server-side', '-f', '-'], input=manifest)
     api.run([*prefix, '-n', OPERATOR_NAMESPACE, 'rollout', 'status', 'deployment/cnpg-controller-manager', '--timeout=180s'])
+
+
+def instances_ready(cluster, pods, image):
+    """Return primary only for a fully reconciled selected manager image.
+
+    Cluster Ready alone is stale at the start of an operator-image rollout.
+    Bootstrap images must match on *every* actual instance, not just a ready
+    old primary or the first updated replica. Historical bootstrap/backup Job
+    pods are not instances; their owner references identify them unambiguously.
+    """
+    metadata = cluster.get('metadata', {})
+    status = cluster.get('status', {})
+    count = cluster.get('spec', {}).get('instances')
+    primary = status.get('currentPrimary')
+    if type(count) is not int or count < 1 or not metadata.get('uid') or status.get('instances') != count or status.get('readyInstances') != count or status.get('phase') != 'Cluster in healthy state' or not primary or status.get('targetPrimary') != primary:
+        return None
+    if not any(condition.get('type') == 'Ready' and condition.get('status') == 'True' for condition in status.get('conditions', [])):
+        return None
+    instances = []
+    for pod in pods:
+        owners = pod.get('metadata', {}).get('ownerReferences', [])
+        if any(owner.get('kind') == 'Job' and owner.get('controller') is True for owner in owners):
+            continue
+        if not any(owner.get('kind') == 'Cluster' and owner.get('uid') == metadata['uid'] and owner.get('name') == metadata.get('name') and owner.get('controller') is True for owner in owners):
+            return None
+        instances.append(pod)
+    if len(instances) != count or len({pod.get('metadata', {}).get('name') for pod in instances}) != count or primary not in {pod.get('metadata', {}).get('name') for pod in instances}:
+        return None
+    for pod in instances:
+        pod_status = pod.get('status', {})
+        bootstrap = [container for container in pod.get('spec', {}).get('initContainers', []) if container.get('name') == 'bootstrap-controller']
+        completed = [container for container in pod_status.get('initContainerStatuses', []) if container.get('name') == 'bootstrap-controller']
+        if pod.get('metadata', {}).get('deletionTimestamp') or not pod.get('metadata', {}).get('uid') or pod_status.get('phase') != 'Running':
+            return None
+        if len(bootstrap) != 1 or bootstrap[0].get('image') != image or len(completed) != 1 or completed[0].get('state', {}).get('terminated', {}).get('exitCode') != 0:
+            return None
+        if not any(condition.get('type') == 'Ready' and condition.get('status') == 'True' for condition in pod_status.get('conditions', [])) or not any(container.get('name') == 'postgres' and container.get('ready') is True for container in pod_status.get('containerStatuses', [])):
+            return None
+    return primary
+
+
+def wait_instances(api, image, timeout=300):
+    """Wait for the selected instance manager on all postgres pods, then SQL.
+
+    Read-only SQL probes may repeat while settling; provisioning/migration SQL
+    is never retried. A second API snapshot rejects a primary/pod replacement
+    concurrent with the probe. The deadline bounds API calls as well as sleeps.
+    """
+    if timeout <= 0:
+        raise RuntimeError('CNPG instance rollout requires a positive deadline')
+    deadline = time.monotonic() + timeout
+
+    def remaining():
+        value = deadline - time.monotonic()
+        if value <= 0:
+            raise RuntimeError('CNPG instance manager rollout did not become fully Ready and writable before deadline')
+        return min(10, value)
+
+    def snapshot():
+        cluster = json.loads(api.kube('get', 'cluster.postgresql.cnpg.io', 'postgres', '-o', 'json', timeout=remaining()).stdout)
+        pods = json.loads(api.kube('get', 'pods', '-l', 'cnpg.io/cluster=postgres', '-o', 'json', timeout=remaining()).stdout)['items']
+        return cluster, pods
+
+    def identities(pods):
+        return sorted((pod['metadata']['name'], pod['metadata'].get('uid')) for pod in pods)
+
+    while True:
+        cluster, pods = snapshot()
+        primary = instances_ready(cluster, pods, image)
+        if primary:
+            probe = api.kube('exec', primary, '--', 'psql', '-U', 'postgres', '-Atqc', 'SELECT NOT pg_is_in_recovery()', check=False, timeout=remaining())
+            if probe.returncode == 0 and probe.stdout.strip() == b't':
+                after_cluster, after_pods = snapshot()
+                if instances_ready(after_cluster, after_pods, image) == primary and identities(pods) == identities(after_pods):
+                    return primary
+        time.sleep(min(2, remaining()))

@@ -149,5 +149,46 @@ class ScopedOperatorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'built-in'):
             cnpg.validate_bindings([binding], 'sso-remediation', {name: role})
 
+    def test_rollout_barrier_rejects_old_ready_primary_until_every_instance_is_current(self):
+        cluster, pods = instance_snapshot()
+        self.assertEqual(cnpg.instances_ready(cluster, pods, IMAGE), 'postgres-2')
+        # Actual failure timeline: Ready remained true before the controller
+        # replaced the old bootstrap image, then replicas updated first.
+        for count in (3, 2, 1):
+            snapshot = copy.deepcopy(pods)
+            for pod in snapshot[:count]:
+                pod['spec']['initContainers'][0]['image'] = 'sso-remediation/cnpg-operator:sha256-' + 'b' * 64
+            self.assertIsNone(cnpg.instances_ready(cluster, snapshot, IMAGE))
+        for mutation in ('terminating', 'not-ready', 'missing', 'extra', 'init-incomplete', 'unhealthy', 'switching', 'stale-count', 'wrong-owner'):
+            current_cluster, current_pods = instance_snapshot()
+            if mutation == 'terminating':
+                current_pods[0]['metadata']['deletionTimestamp'] = '2026-10-23T00:00:00Z'
+            elif mutation == 'not-ready':
+                current_pods[0]['status']['conditions'][0]['status'] = 'False'
+            elif mutation == 'missing':
+                current_pods.pop()
+            elif mutation == 'extra':
+                extra = copy.deepcopy(current_pods[0])
+                extra['metadata'].update(name='postgres-4', uid='pod-4')
+                current_pods.append(extra)
+            elif mutation == 'init-incomplete':
+                current_pods[0]['status']['initContainerStatuses'][0]['state'] = {'running': {}}
+            elif mutation == 'unhealthy':
+                current_cluster['status']['phase'] = 'Upgrading cluster'
+            elif mutation == 'switching':
+                current_cluster['status']['targetPrimary'] = 'postgres-1'
+            elif mutation == 'stale-count':
+                current_cluster['status']['readyInstances'] = 2
+            else:
+                current_pods[0]['metadata']['ownerReferences'][0]['uid'] = 'foreign-cluster'
+            with self.subTest(mutation=mutation):
+                self.assertIsNone(cnpg.instances_ready(current_cluster, current_pods, IMAGE))
+
+
+def instance_snapshot():
+    cluster = {'metadata': {'name': 'postgres', 'uid': 'cluster-id'}, 'spec': {'instances': 3}, 'status': {'instances': 3, 'readyInstances': 3, 'phase': 'Cluster in healthy state', 'currentPrimary': 'postgres-2', 'targetPrimary': 'postgres-2', 'conditions': [{'type': 'Ready', 'status': 'True'}]}}
+    pods = [{'metadata': {'name': 'postgres-' + str(i), 'uid': 'pod-' + str(i), 'ownerReferences': [{'apiVersion': 'postgresql.cnpg.io/v1', 'kind': 'Cluster', 'name': 'postgres', 'uid': 'cluster-id', 'controller': True}]}, 'spec': {'initContainers': [{'name': 'bootstrap-controller', 'image': IMAGE}]}, 'status': {'phase': 'Running', 'conditions': [{'type': 'Ready', 'status': 'True'}], 'containerStatuses': [{'name': 'postgres', 'ready': True}], 'initContainerStatuses': [{'name': 'bootstrap-controller', 'state': {'terminated': {'exitCode': 0}}}]}} for i in range(3)]
+    return cluster, pods
+
 if __name__ == '__main__':
     unittest.main()

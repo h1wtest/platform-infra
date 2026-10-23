@@ -380,6 +380,8 @@ def up():
     from api_network import discover
     apply([discover(sys.modules[__name__])])
     kube('wait', '--for=condition=Ready', 'cluster.postgresql.cnpg.io/postgres', '--timeout=300s')
+    from cnpg_operator import wait_instances
+    wait_instances(sys.modules[__name__], images['cnpg-operator'])
     ca_secret = json.loads(kube('get', 'secret', 'postgres-ca', '-o', 'json').stdout)
     (STATE / 'postgres-ca.crt').write_bytes(base64.b64decode(ca_secret['data']['ca.crt']))
     kube('rollout', 'status', 'statefulset/redpanda', '--timeout=300s')
