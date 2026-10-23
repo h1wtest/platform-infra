@@ -50,6 +50,43 @@ PRIVATE_FILES = {
 MARKER = '.env-secrets.initialized'
 _MARKER_BYTES = b'repository-env-v1\n'
 _ASSIGNMENT = re.compile(r'(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(.*)')
+_DEFAULTS = (REPOSITORIES, PURPOSE_KEYS, dict(OWNERS), OPTIONAL_KEYS, dict(PRIVATE_FILES))
+GENERIC = False
+
+
+def configure(generic=False):
+    global REPOSITORIES, PURPOSE_KEYS, OPTIONAL_KEYS, REQUIRED_KEYS, GENERIC
+    GENERIC = generic
+    REPOSITORIES, PURPOSE_KEYS, owners, OPTIONAL_KEYS, private = _DEFAULTS
+    OWNERS.clear()
+    OWNERS.update(owners)
+    PRIVATE_FILES.clear()
+    PRIVATE_FILES.update(private)
+    if generic:
+        domains = ('catalog', 'billing', 'subscription', 'referral')
+        REPOSITORIES += tuple(domain + '-service' for domain in domains)
+        PURPOSE_KEYS += tuple(domain + '_quarantine_key' for domain in domains)
+        for domain in domains:
+            owner = domain + '-service'
+            for key in (domain + '_token', domain + '_runtime_password',
+                        domain + '_migration_password', 'kafka_' + domain + '_password',
+                        domain + '_quarantine_key'):
+                OWNERS[key] = owner
+            PRIVATE_FILES['certificates/' + owner + '/tls.key'] = (
+                owner, domain.upper() + '_SERVICE_TLS_PRIVATE_KEY')
+        for key in ('nowpayments_api_key', 'nowpayments_ipn_secret'):
+            OWNERS[key] = 'billing-service'
+            OPTIONAL_KEYS += (key,)
+        PRIVATE_FILES['certificates/postgres/tls.key'] = (INFRA, 'POSTGRES_TLS_PRIVATE_KEY')
+        OWNERS['external_event_integrations'] = GO
+        OPTIONAL_KEYS += ('external_event_integrations',)
+    REQUIRED_KEYS = tuple(key for key in OWNERS if key not in OPTIONAL_KEYS)
+
+
+def variable(key):
+    if GENERIC and key in ('admin_email', 'admin_password'):
+        return 'OWNER_' + key.removeprefix('admin_').upper()
+    return key.upper()
 
 
 def _regular(path):
@@ -118,7 +155,20 @@ def _parse(path):
 
 
 def _documents(state):
-    workspace = Path(state).parent.parent
+    state = Path(state)
+    if GENERIC:
+        if state.name != '.generic-local':
+            raise RuntimeError('Generic credentials require isolated .generic-local state')
+        workspace = state / 'owners'
+        if state.is_symlink() or workspace.is_symlink():
+            raise RuntimeError('Isolated credential state must not be a symlink')
+        for owner in REPOSITORIES:
+            directory = workspace / owner
+            if directory.is_symlink():
+                raise RuntimeError('Isolated credential owner must not be a symlink')
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    else:
+        workspace = state.parent.parent
     return {owner: (workspace / owner / '.env', *_parse(workspace / owner / '.env'))
             for owner in REPOSITORIES}
 
@@ -144,8 +194,8 @@ def _validate(values):
 
 
 def _values(documents):
-    values = {key: documents[owner][2][key.upper()] for key, owner in OWNERS.items()
-              if key.upper() in documents[owner][2]}
+    values = {key: documents[owner][2][variable(key)] for key, owner in OWNERS.items()
+              if variable(key) in documents[owner][2]}
     values.setdefault('telegram_bot_token', '')
     _validate(values)
     return values
@@ -263,9 +313,9 @@ def _credential_updates(values):
     removals = {owner: set() for owner in REPOSITORIES}
     for key, owner in OWNERS.items():
         if key in values:
-            updates[owner][key.upper()] = values[key]
+            updates[owner][variable(key)] = values[key]
         else:
-            removals[owner].add(key.upper())
+            removals[owner].add(variable(key))
     return updates, removals
 
 
@@ -299,9 +349,9 @@ def initial_values(state):
     documents = _documents(state)
     if any(documents[owner][2].get(key) for owner, key in PRIVATE_FILES.values()):
         raise RuntimeError('Saved private .env material requires restoring matching certificate state; fresh key generation refused')
-    return {key: documents[owner][2][key.upper()] for key, owner in OWNERS.items()
-            if key.upper() in documents[owner][2]
-            and (documents[owner][2][key.upper()] or key == 'telegram_bot_token')}
+    return {key: documents[owner][2][variable(key)] for key, owner in OWNERS.items()
+            if variable(key) in documents[owner][2]
+            and (documents[owner][2][variable(key)] or key == 'telegram_bot_token')}
 
 
 def load(state):

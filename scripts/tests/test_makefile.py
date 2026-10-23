@@ -16,7 +16,7 @@ class MakeDispatchTests(unittest.TestCase):
         commands = {
             'bootstrap': ['secrets'], 'build': ['build'], 'up': ['up'],
             'check': ['check'], 'status': ['status'], 'stop': ['stop'],
-            'start': ['start'], 'bootstrap-admin': ['bootstrap-admin'],
+            'start': ['start'], 'bootstrap-owner': ['bootstrap-owner'],
             'cluster-identity': ['cluster-identity'],
             'schedule-backups': ['schedule-backups'], 'backup': ['backup'],
             'restore-verify': ['restore-verify', '--backup', '.local/backups/complete'],

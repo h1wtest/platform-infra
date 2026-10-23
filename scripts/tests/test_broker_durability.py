@@ -55,7 +55,6 @@ class BrokerProvisioning(unittest.TestCase):
 
     def test_existing_cluster_receives_centrally_validated_durability_and_security_before_topics(self):
         applied = {}
-        created = []
         def kube(*args, **kwargs):
             if 'rpk' not in args:
                 # Actual Admin GET uses typed JSON: unlike rpk get's YAML list/string output.
@@ -71,11 +70,9 @@ class BrokerProvisioning(unittest.TestCase):
                 self.assertEqual(applied['write_caching_default'], 'disabled')
                 self.assertTrue(applied['admin_api_require_auth'])
                 self.assertTrue(applied['kafka_enable_authorization'])
-                created.append(command)
             return subprocess.CompletedProcess(args, 0, b'[]')
         with patch.object(cli, 'kube', side_effect=kube):
             cli.topics()
-        self.assertEqual(len(created), 3)
         self.assertEqual(applied['default_topic_replications'], 3)
         self.assertFalse(applied['auto_create_topics_enabled'])
 

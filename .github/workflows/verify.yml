@@ -33,13 +33,13 @@ jobs:
         run: |
           umask 077
           uv run --no-project --python 3.12.10 python scripts/render.py --output /tmp/resources.json
-          test -s /tmp/ca.crt
-          chmod 644 /tmp/ca.crt
+          test -s /tmp/resources-ca.crt
+          chmod 644 /tmp/resources-ca.crt
       - name: Validate monitoring configuration with pinned binary image
         run: |
           docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 check rules /etc/platform/alerts.yml
           docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" --workdir /etc/platform docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 test rules /etc/platform/alerts-test.yml
-          docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" -v /tmp:/run/tls:ro docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 check config /etc/platform/prometheus.yml
+          docker run --rm --entrypoint promtool -v "$PWD/observability:/etc/platform:ro" -v /tmp/resources-ca.crt:/run/tls/ca.crt:ro docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2 check config /etc/platform/prometheus.yml
           docker run --rm -v "$PWD/observability:/etc/platform:ro" docker.io/otel/opentelemetry-collector-contrib:0.163.2@sha256:7f22d2a6748110ffb6a59bc0df448bccbf501cdb667d610ede4c61d3863d5849 validate --config=/etc/platform/otel.yml
           docker run --rm -v "$PWD/observability:/etc/platform:ro" docker.io/grafana/tempo:3.1.1@sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044 -config.file=/etc/platform/tempo.yml -config.verify=true
       - name: Scan IaC security configuration
@@ -57,4 +57,4 @@ jobs:
           uv run --no-project --python 3.12.10 python -c 'import sys; sys.path.insert(0, "scripts"); import cli; [cli.build_component(name) for name in cli.PATCHED_COMPONENTS]'
       - name: Remove generated credentials
         if: always()
-        run: rm -f /tmp/resources.json /tmp/core-resources.json /tmp/ca.crt
+        run: rm -f /tmp/resources.json /tmp/core-resources.json /tmp/resources-ca.crt

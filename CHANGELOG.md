@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-24 — generic owner delivery isolation
+
+- Added explicit local generic profile in a fixed distinct namespace, with context/loopback API/namespace-UID fences, isolated owner dotenv/private state and separate access forwards. Original default namespace, retained data and CNPG operator are not migrated or modified by generic delivery.
+- Added four independent owner images, database/migration/backup/TLS/token/quarantine/broker mappings; exact live topic/group and explicit legacy drain ACLs; owner HTTP routes, private integration listener and least-privilege network dependencies.
+- Generic acceptance uses a separate TLS single-instance PostgreSQL StatefulSet, explicitly not HA, avoiding global/shared operator mutation. Optional provider inputs stay billing-only and are never fabricated. Migrated identity bootstrap command to bootstrap-owner with runtime OWNER_* inputs while preserving existing default stored credential bytes.
+- Added behavioral owner-store/TLS/render/context/namespace/ACL/provider-absence/default-compatibility regressions. Execution and full API/UI/provider acceptance remain the integration owner's gate; no new passing runtime evidence is claimed here.
+- Corrected the actual third-party consent navigation boundary: exact `/oauth/consent` reaches the React screen through both nginx layers; protocol endpoints and consent completion remain identity-owned. A real browser authorization previously reached HTTP404, rather than a missing identity consent implementation.
+- Replaced load-balanced application metrics VIP scraping with per-owner Ready-only headless DNS discovery. Every application pod has distinct instance identity, verified owner TLS hostname and stable job/app/service/owner labels; no Kubernetes API permissions or mounted tokens added. Authored real Helm selector/discovery/negative-privilege regressions; parent validates actual Prometheus targets and mutation deltas.
+
 ## 2026-10-23 — registration benchmark
 
 - Added independent `make benchmark-registration` with bounded concurrency, unique disposable users, strict HTTPS/CSRF and unchanged rate limits. Reports successful latency separately from throttles/errors, real registrations/s, per-status counts and protected per-run JSON; all-throttled runs explicitly exit blocked rather than claim capacity.

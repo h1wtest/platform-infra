@@ -16,6 +16,19 @@ CONFIG_FILES = ('gateway.conf', 'prometheus.yml', 'alerts.yml', 'otel.yml', 'tem
                 'grafana-datasources.yml', 'grafana-dashboards.yml', 'platform-dashboard.json')
 
 
+def configure():
+    global DBS, SERVICES, APPLICATION_RELEASES, RELEASE_ORDER
+    import manifests
+    import security_material
+    DBS, SERVICES = manifests.DBS, security_material.SERVICES
+    APPLICATION_RELEASES = (*APPS, 'frontend', 'gateway')
+    RELEASE_ORDER = ('platform-config', 'postgres', 'redpanda', 'mailpit',
+                     'prometheus', 'tempo', 'otel-collector', 'grafana', *APPLICATION_RELEASES)
+
+
+configure()
+
+
 def _revision(values):
     return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -33,6 +46,26 @@ def _secret_volume(name, secret, path, *, mode=None):
     return ({'name': name, 'secret': source}, {'name': name, 'mountPath': path, 'readOnly': True})
 
 
+def prometheus_config(base, namespace):
+    """Discover every Ready application pod via owner-scoped headless DNS.
+
+    Fixed per-owner TLS names verify certificates when addresses are pod IPs;
+    DNS needs no Kubernetes token, API permissions or discovery egress.
+    """
+    configuration = json.loads(base)
+    jobs = []
+    for name, (owner, port, _) in APPS.items():
+        jobs.append({'job_name': 'platform/' + name, 'scheme': 'https',
+            'tls_config': {'ca_file': '/run/tls/ca.crt', 'server_name': name},
+            'dns_sd_configs': [{'names': [f'{name}-metrics.{namespace}.svc.cluster.local'],
+                                'type': 'A', 'port': port, 'refresh_interval': '5s'}],
+            'relabel_configs': [{'target_label': key, 'replacement': value}
+                for key, value in {'job': 'platform', 'app': name, 'service': name,
+                                  'owner': 'notification' if owner == 'worker' else owner}.items()]})
+    configuration['scrape_configs'] = jobs + configuration['scrape_configs']
+    return json.dumps(configuration, indent=2) + '\n'
+
+
 def _base(name, image, ports, *, uid=10001, ready='/health/ready', tls=True):
     return {'name': name, 'image': image, 'ports': ports, 'uid': uid, 'readinessPath': ready,
             'livePath': '/health/live', 'tls': tls, 'env': [], 'volumes': [], 'mounts': [],
@@ -48,6 +81,9 @@ def release_specs(images, state, root):
     discovery before deployment. Static validation supplies explicit fixture rules.
     """
     state, root = Path(state), Path(root)
+    import manifests
+    generic = manifests.NS == 'generic-subscriptions'
+    origin = 'https://localhost:' + ('18448' if generic else '8448')
     secrets = env_secrets.load(state)
     ca = (state / 'ca.crt').read_bytes()
     material = {'platform-ca': {'ca.crt': ca},
@@ -61,6 +97,8 @@ def release_specs(images, state, root):
         directory = state / 'certificates' / name
         material[name + '-tls'] = {'tls.crt': (directory / 'tls.crt').read_bytes(),
                                   'tls.key': (directory / 'tls.key').read_bytes(), 'ca.crt': ca}
+    if generic:
+        material['postgres-ca'] = {'ca.crt': ca}
     for database in DBS:
         material[database + '-database'] = {
             'DATABASE_URL': database_url(database + '_runtime', secrets[database + '_runtime_password'], database + '_db'),
@@ -69,13 +107,25 @@ def release_specs(images, state, root):
                       for key, value in entries.items()} for name, entries in material.items()}
     configs = {filename.replace('.', '-'): {filename: (root / 'observability' / filename).read_text()}
                for filename in CONFIG_FILES}
+    if generic:
+        configs['gateway-conf']['gateway.conf'] = configs['gateway-conf']['gateway.conf'].replace(
+            'https://localhost:8448', origin)
+    else:
+        # nginx resolves static proxy upstreams at startup: absent generic owners
+        # must not make the original default stand unbootable.
+        config = configs['gateway-conf']['gateway.conf']
+        configs['gateway-conf']['gateway.conf'] = '\n'.join(
+            line for line in config.splitlines()
+            if not any(owner in line for owner in manifests.GENERIC_APPS)) + '\n'
+    configs['prometheus-yml']['prometheus.yml'] = prometheus_config(
+        configs['prometheus-yml']['prometheus.yml'], manifests.NS)
     configs['redpanda-config'] = {**{str(index) + '.json': json.dumps(broker_config(index)) for index in range(3)},
                                  'bootstrap.json': json.dumps(broker_cluster_config())}
     result = {'platform-config': {'chart': 'platform-config', 'values': {
         'name': 'platform-config', 'secrets': encoded, 'configMaps': configs,
         'applications': [{'name': name, 'port': port} for name, (_, port, _) in APPS.items()]}}, 
-        'postgres': {'chart': 'platform-postgres', 'values': {'name': 'postgres', 'image': images['postgres']}},
-        'redpanda': {'chart': 'platform-redpanda', 'values': {'name': 'redpanda', 'image': images['redpanda']}},
+        'postgres': {'chart': 'platform-postgres', 'values': {'name': 'postgres', 'image': images['postgres'], **({'localAcceptance': True} if generic else {})}},
+        'redpanda': {'chart': 'platform-redpanda', 'values': {'name': 'redpanda', 'image': images['redpanda'], **({'localEpoll': True} if generic else {})}},
         'mailpit': {'chart': 'platform-mailpit', 'values': {'name': 'mailpit', 'image': images['mailpit']}}}
     mailpit = _base('mailpit', images['mailpit'], [1025, 8025], ready='/readyz', tls=False)
     mailpit.update(env=_env({'MP_SMTP_BIND_ADDR': '0.0.0.0:1025', 'MP_DATABASE': '/data/mailpit.db'}),
@@ -88,7 +138,7 @@ def release_specs(images, state, root):
     for name, (target, port, database) in APPS.items():
         role = 'notification' if target == 'worker' else target
         env = {'DATABASE_URL': (database + '-database', 'DATABASE_URL'), 'HTTP_PORT': port,
-               'PUBLIC_ORIGIN': 'https://localhost:8448', 'OAUTH_ISSUER': 'https://localhost:8448',
+               'PUBLIC_ORIGIN': origin, 'OAUTH_ISSUER': origin,
                'TLS_CERT_FILE': '/run/tls/tls.crt', 'TLS_KEY_FILE': '/run/tls/tls.key', 'INTERNAL_CA_FILE': '/run/tls/ca.crt',
                'KAFKA_BROKERS': ','.join(f'redpanda-{index}.redpanda:29092' for index in range(3)),
                'KAFKA_TLS_CA_FILE': '/run/tls/ca.crt', 'KAFKA_SASL_USERNAME': role,
@@ -116,9 +166,44 @@ def release_specs(images, state, root):
         if target in ('profile', 'notification', 'worker'):
             env.update(TELEGRAM_BOT_TOKEN=('platform-secrets', 'telegram_bot_token'),
                        TELEGRAM_WEBHOOK_SECRET=('platform-secrets', 'telegram_webhook_secret'))
+        if generic:
+            env.update(CATALOG_URL='https://catalog-service:8006',
+                       BILLING_URL='https://billing-service:8007',
+                       SUBSCRIPTION_URL='https://subscription-service:8008',
+                       REFERRAL_URL='https://referral-service:8009')
+            if target == 'profile' and secrets.get('external_event_integrations'):
+                env['EXTERNAL_EVENT_INTEGRATIONS'] = ('platform-secrets', 'external_event_integrations')
+            if target == 'identity':
+                env['IDENTITY_INTERNAL_TOKEN'] = ('platform-secrets', 'identity_token')
+                for owner in ('catalog', 'billing', 'subscription', 'referral'):
+                    env[owner.upper() + '_INTERNAL_TOKEN'] = ('platform-secrets', owner + '_token')
+            if target == 'catalog':
+                material['catalog-readers'] = {'tokens': json.dumps({
+                    owner: secrets[owner + '_token'] for owner in ('billing', 'subscription')})}
+                encoded['catalog-readers'] = {'tokens': base64.b64encode(material['catalog-readers']['tokens'].encode()).decode()}
+                env['CATALOG_READER_TOKENS'] = ('catalog-readers', 'tokens')
+            if target == 'subscription':
+                env['BILLING_SERVICE_TOKEN'] = ('platform-secrets', 'billing_token')
+                material['subscription-readers'] = {'tokens': json.dumps({
+                    owner: secrets[owner + '_token'] for owner in ('profile', 'notification')})}
+                encoded['subscription-readers'] = {'tokens': base64.b64encode(material['subscription-readers']['tokens'].encode()).decode()}
+                env['SUBSCRIPTION_READER_TOKENS'] = ('subscription-readers', 'tokens')
+            if target == 'billing':
+                env.update(BILLING_SUBSCRIPTION_TOKEN=('platform-secrets', 'subscription_token'),
+                           NOWPAYMENTS_BASE_URL='https://api.nowpayments.io/v1',
+                           NOWPAYMENTS_NETWORKS='USDTTRC20,USDTBSC', BILLING_ENV='production')
+                for key in ('nowpayments_api_key', 'nowpayments_ipn_secret'):
+                    if secrets.get(key):
+                        env[key.upper()] = ('platform-secrets', key)
+            if target == 'referral':
+                env.update(REFERRAL_IDENTITY_TOKEN=('platform-secrets', 'identity_token'),
+                           REFERRAL_BILLING_TOKEN=('platform-secrets', 'billing_token'),
+                           REFERRAL_PROFILE_TOKEN=('platform-secrets', 'profile_token'),
+                           REFERRAL_PUBLIC_ORIGIN=origin, REFERRAL_PAYOUT_NETWORKS='bsc,tron')
         values = _base(name, images[target], [port])
         values.update(env=_env(env), replicas=1 if target == 'worker' else 2,
                       autoscaling=target != 'worker', pdb=True, databaseGate=True,
+                      metricsDiscovery=True,
                       postgresImage=images['postgres'], databaseGateScript=database_gate.SCRIPT,
                       databaseSecret=database + '-database')
         for volume in [_secret_volume('tls', name + '-tls', '/run/tls', mode=0o440),
@@ -139,10 +224,13 @@ def release_specs(images, state, root):
     frontend.update(replicas=2, livePath='/', servicePorts=[{'name': 'p80', 'port': 80, 'targetPort': 8080}])
     result['frontend'] = {'chart': 'platform-service', 'values': frontend}
     gateway = _base('gateway', images['gateway'], [8443, 8080], uid=101, ready='/health/live')
-    gateway.update(replicas=2, pdb=True, publicService=True, command=['nginx', '-g', 'daemon off;'],
+    gateway.update(replicas=2, pdb=True, publicService=not generic, command=['nginx', '-g', 'daemon off;'],
                    servicePorts=[{'name': 'p443', 'port': 443, 'targetPort': 8443}, {'name': 'p80', 'port': 80, 'targetPort': 8080}],
                    credentialRevision=_revision({'identity': encoded['gateway-identity'], 'tls': encoded['gateway-tls']}),
                    configRevision=_revision(configs['gateway-conf']))
+    if generic:
+        gateway['ports'].append(9443)
+        gateway['servicePorts'].append({'name': 'integration', 'port': 9443, 'targetPort': 9443})
     for volume, mount in [_secret_volume('tls', 'gateway-tls', '/run/tls', mode=0o440),
                           _secret_volume('trusted-headers', 'gateway-identity', '/run/gateway', mode=0o440)]:
         gateway['volumes'].append(volume); gateway['mounts'].append(mount)
@@ -174,4 +262,10 @@ def release_specs(images, state, root):
             values.update(cpu='500m', memory='1Gi', cpuLimit='4', memoryLimit='4Gi')
             values['servicePorts'].append({'name': 'p4317', 'port': 4317, 'targetPort': 4317})
         result[name] = {'chart': 'platform-monitoring', 'values': values}
+    # Token-map Secrets contribute to the owning workload restart revision without
+    # leaking their credential values into Deployment annotations.
+    for owner, secret_name in (('catalog', 'catalog-readers'), ('subscription', 'subscription-readers')):
+        if generic:
+            values = result[owner + '-service']['values']
+            values['credentialRevision'] = _revision([values['credentialRevision'], encoded[secret_name]])
     return {name: result[name] for name in RELEASE_ORDER}

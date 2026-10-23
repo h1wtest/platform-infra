@@ -30,6 +30,7 @@
     "autoscaling": {
       "type": "boolean"
     },
+    "metricsDiscovery": {"type": "boolean"},
     "pdb": {
       "type": "boolean"
     },

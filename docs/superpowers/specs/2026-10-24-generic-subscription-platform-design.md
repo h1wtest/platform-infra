@@ -1,7 +1,7 @@
 # Универсальная микросервисная платформа аккаунтов и подписок
 
 Дата: 2026-10-24.
-Статус: проект для утверждения пользователем; код новой функциональности не изменён.
+Статус: дизайн утверждён для реализации пользователем в архивированном контексте текущей задачи; реализация выполнена в task worktrees, идёт интегрированная локальная приёмка. Это не утверждение о завершении всех gates или готовности публикации; финальные статусы/evidence сверяет integration owner.
 Рабочая ветка документации: `feat/generic-subscription-platform`.
 
 ## 1. Цель и полный объём
@@ -219,4 +219,4 @@ Observability: redacted structured logs, W3C traces HTTP→outbox→Kafka→cons
 
 Реестр конкретных deliverables/зависимостей/acceptance: `docs/superpowers/plans/2026-10-24-generic-subscription-platform-task-register.md`.
 
-Этот документ — архитектурный проект, не утверждение о реализации новых commerce-функций. После утверждения пользователем: составить исполняемые subsystem implementation plans с exact files/interfaces/test commands, затем реализовывать dependency waves, с review и реальной приёмкой. Вопросов о бренде/конкретном продукте не требуется. Публикация remote repos/веток, PR/merge/deploy и реальные операции переводов не следуют из утверждения архитектуры автоматически.
+Утверждение дизайна и реализация owner slices уже состоялись; exact implementation plans использованы для dependency waves. Текущая контрольная точка — real local API/worker/UI/отказная приёмка, независимое ревью и финальная сверка source/image/provenance. Состояние и ограничения отражаются в реестре задач и `docs/handoff.md`; сохраняются все критерии раздела13. V03 остаётся OPEN при отсутствии current-task реальных provider credentials/public callback, независимо от старой Telegram evidence или успешного deterministic fixture. Публикация remote repos/веток, push/PR/merge/deploy, cloud/production и реальные переводы не следуют из утверждения архитектуры; нужны отдельные разрешения. Финальные commit/image identities не придумываются до freeze и доказанной сверки.

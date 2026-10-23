@@ -62,7 +62,8 @@ def specs(runtime, images):
     from release_values import release_specs
     from api_network import discover
     result = release_specs(selected_images(runtime, images), runtime.STATE, runtime.ROOT)
-    result['platform-config']['values']['apiNetworkPolicy'] = discover(runtime)
+    if runtime.NS != 'generic-subscriptions':
+        result['platform-config']['values']['apiNetworkPolicy'] = discover(runtime)
     return result
 
 

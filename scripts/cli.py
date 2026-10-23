@@ -43,6 +43,35 @@ PINS = {
 
 # Only these selected runtimes have organization-owned security extension recipes.
 PATCHED_COMPONENTS = {'gateway': 'nginx', 'grafana': 'grafana', 'tempo': 'tempo', 'cnpg-operator': 'cnpg-operator'}
+PROFILE = 'default'
+PUBLIC_ORIGIN = 'https://localhost:8448'
+GENERIC_CONTEXTS = frozenset({'k3d-sso-remediation'})
+
+
+def configure_profile(profile='default', context=None):
+    """Select one fixed namespace/state boundary, never arbitrary cloud contexts."""
+    global PROFILE, STATE, NS, CONTEXT, PUBLIC_ORIGIN
+    if profile not in ('default', 'generic'):
+        raise RuntimeError('Unknown local infrastructure profile')
+    if profile == 'generic' and context not in GENERIC_CONTEXTS:
+        raise RuntimeError('Generic profile requires explicit allowlisted local context')
+    if profile == 'default' and context not in (None, 'k3d-sso-remediation'):
+        raise RuntimeError('Default profile requires original local context')
+    PROFILE = profile
+    NS = 'generic-subscriptions' if profile == 'generic' else CLUSTER
+    CONTEXT = context or 'k3d-sso-remediation'
+    STATE = ROOT / ('.generic-local' if profile == 'generic' else '.local')
+    PUBLIC_ORIGIN = 'https://localhost:' + ('18448' if profile == 'generic' else '8448')
+    import env_secrets
+    import security_material
+    manifests.configure(NS)
+    env_secrets.configure(profile == 'generic')
+    security_material.configure(NS)
+    # Imported modules retain mutable application maps but immutable tuples need refreshing.
+    for name in ('release_values', 'credential_guard', 'helm_release'):
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, 'configure'):
+            module.configure()
 
 
 def run(args, *, input=None, capture=True, timeout=600, check=True):
@@ -88,6 +117,9 @@ def require_tools():
 def create_secrets(state):
     import env_secrets
     from security_material import ensure
+    state = Path(state)
+    if state.is_symlink() or (PROFILE == 'generic' and state.name != '.generic-local'):
+        raise RuntimeError('Credential state must be a real directory in the selected isolated profile')
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(state, 0o700)
     if (state / 'secrets.json').exists():
@@ -101,8 +133,11 @@ def create_secrets(state):
         return ensure(state, values, run)
     configured = env_secrets.initial_values(state)
     values = {name: secrets.token_urlsafe(32) for name in ('postgres_password', 'identity_token', 'profile_token', 'notification_token', 'admin_token', 'gateway_token', 'grafana_password', 'admin_password', 'telegram_webhook_secret')}
-    values['admin_email'] = os.environ.get('ADMIN_EMAIL', 'admin@sso.local')
-    values['admin_password'] = os.environ.get('ADMIN_PASSWORD', values['admin_password'])
+    if PROFILE == 'generic':
+        values.update({domain + '_token': secrets.token_urlsafe(32)
+                       for domain in ('catalog', 'billing', 'subscription', 'referral')})
+    values['admin_email'] = os.environ.get('OWNER_EMAIL', 'owner@platform.local')
+    values['admin_password'] = os.environ.get('OWNER_PASSWORD', values['admin_password'])
     values['telegram_bot_token'] = os.environ.get('TELEGRAM_BOT_TOKEN', '')
     for db in manifests.DBS:
         for role in ('runtime', 'migration'):
@@ -113,7 +148,7 @@ def create_secrets(state):
         run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', state / 'ca.key'])
         run(['openssl', 'req', '-x509', '-new', '-sha256', '-days', '365', '-key', state / 'ca.key', '-subj', '/CN=SSO Remediation Local CA', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-addext', 'subjectKeyIdentifier=hash', '-addext', 'authorityKeyIdentifier=keyid:always', '-out', state / 'ca.crt'])
         run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', state / 'tls.key'])
-        san = ['localhost', 'identity-service', 'profile-service', 'notification-service', 'notification-worker', 'admin-audit-service', 'gateway']
+        san = ['localhost', *manifests.APPS, 'gateway']
         services = list(san[1:])
         san += [f'{name}.{NS}.svc.cluster.local' for name in services]
         san += [f'{name}.{NS}.svc' for name in services]
@@ -133,8 +168,11 @@ def create_secrets(state):
 
 def workspace_hash(workspace=WORKSPACE):
     digest = hashlib.sha256()
-    ignored = {'.git', '.local', 'target', 'node_modules', 'dist', '.venv', '__pycache__', 'docs', '.svelte-kit'}
-    for directory in ('identity-service', 'user-notification-service', 'frontend', 'platform-contracts', 'platform-infra/components'):
+    ignored = {'.git', '.local', '.generic-local', 'target', 'node_modules', 'dist', '.venv', '__pycache__', 'docs', '.svelte-kit'}
+    directories = ['identity-service', 'user-notification-service', 'frontend', 'platform-contracts', 'platform-infra/components']
+    if PROFILE == 'generic':
+        directories += list(manifests.GENERIC_APPS)
+    for directory in directories:
         for base, dirs, files in os.walk(workspace / directory):
             dirs[:] = sorted(d for d in dirs if d not in ignored)
             for name in sorted(files):
@@ -222,7 +260,10 @@ def build_images():
     source = workspace_hash()
     for name in PATCHED_COMPONENTS:
         images.update(build_component(name))
-    for name, repo in [('identity', 'identity-service'), ('profile', 'user-notification-service'), ('notification', 'user-notification-service'), ('worker', 'user-notification-service'), ('admin', 'user-notification-service'), ('frontend', 'frontend')]:
+    applications = [('identity', 'identity-service'), ('profile', 'user-notification-service'), ('notification', 'user-notification-service'), ('worker', 'user-notification-service'), ('admin', 'user-notification-service'), ('frontend', 'frontend')]
+    if PROFILE == 'generic':
+        applications += [(target, repo) for repo, (target, _, _) in manifests.GENERIC_APPS.items()]
+    for name, repo in applications:
         staging = f'sso-remediation/{name}:build-' + uuid.uuid4().hex
         command = ['docker', 'build', '--pull', '-f', str(WORKSPACE / repo / 'Dockerfile'), '-t', staging]
         if repo == 'user-notification-service':
@@ -245,11 +286,11 @@ def build_images():
         raise RuntimeError('Build inputs changed during image compilation; immutable lock not published. Stabilize source and rebuild.')
     images['source_sha256'] = source
     (STATE / 'images.lock.json').write_text(json.dumps(images, indent=2) + '\n')
-    print('Built content-addressed application/gateway tags and locked registry bases in .local/images.lock.json')
+    print('Built content-addressed application/gateway tags and locked registry bases in ' + str(STATE / 'images.lock.json'))
 
 
-def load_images(state=STATE):
-    path = state / 'images.lock.json'
+def load_images(state=None):
+    path = (STATE if state is None else state) / 'images.lock.json'
     if not path.is_file():
         raise RuntimeError('No immutable image lock. Run make build first.')
     images = json.loads(path.read_text())
@@ -269,6 +310,8 @@ def load_images(state=STATE):
 
 
 def cluster():
+    if PROFILE == 'generic':
+        raise RuntimeError('Generic profile is namespace-only; cluster creation is forbidden')
     from cluster_identity import guard
     clusters = json.loads(run(['k3d', 'cluster', 'list', '-o', 'json']).stdout)
     created = not any(item['name'] == CLUSTER for item in clusters)
@@ -287,6 +330,8 @@ def cluster():
 
 
 def start_cluster(timeout='180s', k3d='k3d'):
+    if PROFILE == 'generic':
+        raise RuntimeError('Generic profile is namespace-only; cluster start is forbidden')
     from cluster_identity import guard
     guard(sys.modules[__name__], live=False)
     run([k3d, 'cluster', 'start', CLUSTER, '--wait', '--timeout', timeout], timeout=240)
@@ -302,6 +347,8 @@ def install_operator(images):
 
 
 def primary():
+    if PROFILE == 'generic':
+        return 'postgres-0'
     value = json.loads(kube('get', 'cluster.postgresql.cnpg.io', 'postgres', '-o', 'json').stdout)
     name = value.get('status', {}).get('currentPrimary')
     if not name:
@@ -334,8 +381,26 @@ def migration_jobs(images, selected=None):
         if target == 'worker' or (selected is not None and name != selected):
             continue
         job_name = 'migrate-' + target + '-' + uuid.uuid4().hex[:8]
-        spec = manifests.pod(name, images[target], env={'DATABASE_URL': (db + '-database', 'MIGRATION_DATABASE_URL'), **({'MFA_ENCRYPTION_KEY': ('platform-secrets', 'mfa_encryption_key')} if target == 'identity' else {})}, args=['migrate'])
+        migration_env = {'DATABASE_URL': (db + '-database', 'MIGRATION_DATABASE_URL')}
+        if target == 'identity':
+            migration_env['MFA_ENCRYPTION_KEY'] = ('platform-secrets', 'mfa_encryption_key')
+        if name in manifests.GENERIC_APPS:
+            migration_env.update(HTTP_PORT=str(manifests.APPS[name][1]), PUBLIC_ORIGIN=PUBLIC_ORIGIN,
+                INTERNAL_SERVICE_TOKEN=('platform-secrets', target + '_token'),
+                IDENTITY_URL='https://identity-service:8001', TLS_CERT_FILE='/run/tls/tls.crt',
+                TLS_KEY_FILE='/run/tls/tls.key', INTERNAL_CA_FILE='/run/tls/ca.crt',
+                KAFKA_BROKERS=','.join(f'redpanda-{index}.redpanda:29092' for index in range(3)),
+                KAFKA_TLS_CA_FILE='/run/tls/ca.crt', KAFKA_SASL_USERNAME=target,
+                KAFKA_SASL_PASSWORD=('platform-secrets', 'kafka_' + target + '_password'),
+                QUARANTINE_ENCRYPTION_KEY=('platform-secrets', target + '_quarantine_key'))
+        spec = manifests.pod(name, images[target], env=migration_env, args=['migrate'])
+        if name in manifests.GENERIC_APPS:
+            spec['volumes'].append({'name': 'tls', 'secret': {'secretName': name + '-tls', 'defaultMode': 0o440}})
+            spec['containers'][0]['volumeMounts'].append({'name': 'tls', 'mountPath': '/run/tls', 'readOnly': True})
         spec['restartPolicy'] = 'Never'
+        # Migration precedes application release installation; use the namespace
+        # default account with token automount disabled, not a not-yet-created SA.
+        spec['serviceAccountName'] = 'default'
         spec['volumes'].append({'name': 'postgres-ca', 'secret': {'secretName': 'postgres-ca'}})
         spec['containers'][0]['volumeMounts'].append({'name': 'postgres-ca', 'mountPath': '/run/postgres', 'readOnly': True})
         from database_gate import attach
@@ -364,7 +429,8 @@ def configure_brokers():
 
 def topics():
     configure_brokers()
-    for name, retention in [('identity.events.v1', '604800000'), ('notification.commands.v1', '86400000'), ('platform.dlq.v1', '604800000')]:
+    from broker_security import topic_inventory
+    for name, retention in topic_inventory(PROFILE == 'generic'):
         current = kube('exec', 'redpanda-0', '--', 'rpk', '-X', 'brokers=localhost:29092', 'topic', 'list', '--format', 'json').stdout
         records = json.loads(current)
         if not any(item['name'] == name for item in records):
@@ -377,28 +443,39 @@ def up():
     images = load_images()
     if images['source_sha256'] != workspace_hash():
         raise RuntimeError('Build inputs changed since image lock; run make build')
-    cluster()
+    if PROFILE == 'generic':
+        from cluster_identity import guard
+        guard(sys.modules[__name__], initialize=True)
+    else:
+        cluster()
     from release_control import selected_images
     images = selected_images(sys.modules[__name__], images, reconcile=True)
     from credential_guard import verify
     verify(sys.modules[__name__], values)
-    for name in ('identity', 'profile', 'notification', 'worker', 'admin', 'frontend', *PATCHED_COMPONENTS):
+    for name in (*[item[0] for item in manifests.APPS.values()], 'frontend', *PATCHED_COMPONENTS):
         if images[name].startswith('sso-remediation/'):
             verify_local_image(name, images[name], images[name + '_id'])
         else:
             run(['docker', 'pull', images[name]], timeout=900)
         run(['k3d', 'image', 'import', images[name], '-c', CLUSTER], timeout=600)
-    install_operator(images)
+    if PROFILE != 'generic':
+        install_operator(images)
     import helm_release
     from release_control import specs
     desired = specs(sys.modules[__name__], images)
-    apply([{'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': NS, 'labels': {'pod-security.kubernetes.io/enforce': 'restricted', 'pod-security.kubernetes.io/enforce-version': 'v1.33'}}}])
+    if PROFILE != 'generic':
+        apply([{'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': NS, 'labels': {'pod-security.kubernetes.io/enforce': 'restricted', 'pod-security.kubernetes.io/enforce-version': 'v1.33'}}}])
     for release in ('platform-config', 'postgres', 'redpanda', 'mailpit'):
         helm_release.deploy(sys.modules[__name__], release, desired[release], timeout=360)
-    kube('wait', '--for=condition=Ready', 'cluster.postgresql.cnpg.io/postgres', '--timeout=300s')
-    from cnpg_operator import wait_instances
-    wait_instances(sys.modules[__name__], images['cnpg-operator'])
-    ca_secret = json.loads(kube('get', 'secret', 'postgres-ca', '-o', 'json').stdout)
+    if PROFILE == 'generic':
+        kube('rollout', 'status', 'statefulset/postgres', '--timeout=300s')
+        ca_secret = json.loads(kube('get', 'secret', 'platform-ca', '-o', 'json').stdout)
+    else:
+        kube('wait', '--for=condition=Ready', 'cluster.postgresql.cnpg.io/postgres', '--timeout=300s')
+        from cnpg_operator import wait_instances
+        wait_instances(sys.modules[__name__], images['cnpg-operator'])
+        ca_secret = json.loads(kube('get', 'secret', 'postgres-ca', '-o', 'json').stdout)
+    # Both profiles expose verified PostgreSQL CA material through owner-specific state.
     (STATE / 'postgres-ca.crt').write_bytes(base64.b64decode(ca_secret['data']['ca.crt']))
     kube('rollout', 'status', 'statefulset/redpanda', '--timeout=300s')
     from broker_health import wait_healthy
@@ -413,10 +490,10 @@ def up():
         helm_release.deploy(sys.modules[__name__], release, desired[release], timeout=240)
     for name in [*manifests.APPS, 'frontend', 'gateway', 'mailpit', 'tempo', 'prometheus', 'grafana', 'otel-collector']:
         kube('rollout', 'status', 'deployment/' + name, '--timeout=240s')
-    print('Local environment available at https://localhost:8448 (trust .local/ca.crt explicitly). Existing clusters untouched.')
+    print('Local environment deployed in ' + NS + '; access ' + PUBLIC_ORIGIN + ' using explicit loopback forwards. Trust ' + str(STATE / 'ca.crt') + ' only for this stand.')
 
 
-def bootstrap_admin():
+def bootstrap_owner():
     images = load_images()
     from helm_release import service_deployment
     app = service_deployment(sys.modules[__name__], 'identity-service', images)
@@ -424,12 +501,13 @@ def bootstrap_admin():
     spec['restartPolicy'] = 'Never'
     c = spec['containers'][0]
     c.pop('readinessProbe', None); c.pop('livenessProbe', None); c.pop('startupProbe', None)
-    c['args'] = ['bootstrap-admin']
-    c['env'] += [{'name': 'ADMIN_EMAIL', 'valueFrom': {'secretKeyRef': {'name': 'platform-secrets', 'key': 'admin_email'}}}, {'name': 'ADMIN_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': 'platform-secrets', 'key': 'admin_password'}}}]
-    name = 'bootstrap-admin-' + uuid.uuid4().hex[:8]
+    c['args'] = ['bootstrap-owner']
+    c['env'] += [{'name': 'OWNER_EMAIL', 'valueFrom': {'secretKeyRef': {'name': 'platform-secrets', 'key': 'admin_email'}}}, {'name': 'OWNER_PASSWORD', 'valueFrom': {'secretKeyRef': {'name': 'platform-secrets', 'key': 'admin_password'}}}]
+    name = 'bootstrap-owner-' + uuid.uuid4().hex[:8]
     apply([manifests.resource('Job', name, {'backoffLimit': 0, 'activeDeadlineSeconds': 120, 'ttlSecondsAfterFinished': 86400, 'template': {'metadata': {'labels': {'app': 'identity-service'}}, 'spec': spec}})])
     kube('wait', '--for=condition=complete', 'job/' + name, '--timeout=150s')
-    print('Admin bootstrapped; credentials are in identity-service/.env. Complete MFA before admin commands.')
+    owner_env = STATE / 'owners' / 'identity-service' / '.env' if PROFILE == 'generic' else WORKSPACE / 'identity-service' / '.env'
+    print('Owner bootstrapped; credentials remain in ' + str(owner_env) + '. Complete MFA before privileged commands.')
 
 
 def encrypt_file(source, destination, key):
@@ -453,11 +531,20 @@ def decrypt_file(source, destination, key):
         run(['openssl', 'enc', '-d', '-aes-256-cbc', '-pbkdf2', '-iter', '600000', '-in', cipher, '-out', destination, '-pass', 'file:' + str(key)])
 
 
+def wait_writable():
+    if PROFILE == 'generic':
+        kube('rollout', 'status', 'statefulset/postgres', '--timeout=300s')
+        if dbsql('SELECT NOT pg_is_in_recovery()') != 't':
+            raise RuntimeError('Generic local PostgreSQL is not writable')
+    else:
+        from fault_lifecycle import wait_writable as wait
+        wait(sys.modules[__name__])
+
+
 def backup():
     import env_secrets
     env_secrets.materialize(STATE)
-    from fault_lifecycle import wait_writable
-    wait_writable(sys.modules[__name__])
+    wait_writable()
     backup_dir = STATE / 'backups' / (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8])
     backup_dir.mkdir(parents=True, mode=0o700)
     started = time.time()
@@ -532,8 +619,10 @@ def restore_verify(path):
 
 
 def port_forward(service, port):
-    print(f'Forwarding only loopback 127.0.0.1:{port} to {service}; Ctrl-C stops access', flush=True)
-    run(['kubectl', '--context', CONTEXT, '-n', NS, 'port-forward', '--address=127.0.0.1', 'service/' + service, f'{port}:' + {'mailpit': '8025', 'prometheus': '9090', 'grafana': '3000', 'tempo': '3200'}[service]], capture=False, timeout=86400)
+    target = 'gateway' if service in ('gateway', 'gateway-http') else service
+    remote = {'mailpit': '8025', 'prometheus': '9090', 'grafana': '3000', 'tempo': '3200', 'gateway': '443', 'gateway-http': '80'}[service]
+    print(f'Forwarding only loopback 127.0.0.1:{port} to {target}; Ctrl-C stops access', flush=True)
+    run(['kubectl', '--context', CONTEXT, '-n', NS, 'port-forward', '--address=127.0.0.1', 'service/' + target, f'{port}:' + remote], capture=False, timeout=86400)
 
 
 def check():
@@ -559,10 +648,15 @@ def check():
         raise RuntimeError('Redpanda stateful controller is not fully updated/Ready')
     from broker_health import wait_healthy
     wait_healthy(sys.modules[__name__], timeout=30)
-    cluster = json.loads(kube('get', 'cluster.postgresql.cnpg.io', 'postgres', '-o', 'json').stdout)
-    if cluster.get('status', {}).get('readyInstances') != cluster['spec']['instances'] or not any(c['type'] == 'Ready' and c['status'] == 'True' for c in cluster.get('status', {}).get('conditions', [])):
-        raise RuntimeError('PostgreSQL required instances are not all Ready')
-    run(['curl', '--fail', '--silent', '--show-error', '--max-time', '10', '--cacert', STATE / 'ca.crt', 'https://localhost:8448/.well-known/openid-configuration'])
+    if PROFILE == 'generic':
+        postgres = json.loads(kube('get', 'statefulset', 'postgres', '-o', 'json').stdout)
+        if postgres.get('status', {}).get('readyReplicas') != 1:
+            raise RuntimeError('Local single PostgreSQL instance is not Ready (generic profile is not HA)')
+    else:
+        cluster = json.loads(kube('get', 'cluster.postgresql.cnpg.io', 'postgres', '-o', 'json').stdout)
+        if cluster.get('status', {}).get('readyInstances') != cluster['spec']['instances'] or not any(c['type'] == 'Ready' and c['status'] == 'True' for c in cluster.get('status', {}).get('conditions', [])):
+            raise RuntimeError('PostgreSQL required instances are not all Ready')
+    run(['curl', '--fail', '--silent', '--show-error', '--max-time', '10', '--cacert', STATE / 'ca.crt', PUBLIC_ORIGIN + '/.well-known/openid-configuration'])
     print('All current required controllers/pods and broker quorum Ready; verified-certificate discovery succeeded. Historical Jobs preserved; business acceptance remains separate.')
 
 
@@ -655,6 +749,21 @@ def persistence():
             original_error.add_note('Owned disposable DB cleanup deferred until primary recovery: ' + database)
 
 
+def wait_port_forward(process, local_port, remote_port, timeout=15):
+    """Require this process's exact kubectl readiness, never another listener."""
+    import select
+    expected = f'Forwarding from 127.0.0.1:{local_port} -> {remote_port}'.encode()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError('Owned port forward exited before readiness')
+        if select.select([process.stdout], [], [], min(0.2, max(0, deadline - time.monotonic())))[0]:
+            line = process.stdout.readline().strip()
+            if line == expected:
+                return
+    raise RuntimeError('Owned port forward readiness deadline exceeded')
+
+
 def alerts():
     rules = '  - name: acceptance\n    rules:\n      - alert: AcceptanceProbe\n        expr: vector(1)\n        for: 0s\n        labels:\n          severity: test\n'
     import copy
@@ -663,15 +772,19 @@ def alerts():
     temporary = copy.deepcopy(configuration)
     temporary['configMaps']['alerts-yml']['alerts.yml'] += '\n' + rules
     process = None
+    local_port = 39090 if PROFILE == 'generic' else 29090
     try:
         helm_release.deploy(sys.modules[__name__], 'platform-config', {'chart': 'platform-config', 'values': temporary})
         kube('rollout', 'restart', 'deployment/prometheus')
         kube('rollout', 'status', 'deployment/prometheus', '--timeout=180s')
-        process = subprocess.Popen(['kubectl', '--context', CONTEXT, '-n', NS, 'port-forward', '--address=127.0.0.1', 'service/prometheus', '29090:9090'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process = subprocess.Popen(['kubectl', '--context', CONTEXT, '-n', NS, 'port-forward', '--address=127.0.0.1', 'service/prometheus', f'{local_port}:9090'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        wait_port_forward(process, local_port, 9090)
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError('Owned Prometheus port forward exited; refusing another listener')
             try:
-                with urllib.request.urlopen('http://127.0.0.1:29090/api/v1/alerts', timeout=3) as response:
+                with urllib.request.urlopen(f'http://127.0.0.1:{local_port}/api/v1/alerts', timeout=3) as response:
                     data = json.load(response)
                 if any(a['labels'].get('alertname') == 'AcceptanceProbe' and a['state'] == 'firing' for a in data['data']['alerts']):
                     (STATE / 'alert-verification.json').write_text(json.dumps(data, indent=2) + '\n')
@@ -683,7 +796,11 @@ def alerts():
         raise RuntimeError('Acceptance alert did not reach firing state')
     finally:
         if process is not None:
-            process.terminate(); process.wait(timeout=10)
+            try:
+                process.terminate()
+                process.wait(timeout=10)
+            finally:
+                process.stdout.close()
         helm_release.restore_config(sys.modules[__name__], configuration)
         kube('rollout', 'restart', 'deployment/prometheus')
         kube('rollout', 'status', 'deployment/prometheus', '--timeout=180s')
@@ -691,8 +808,19 @@ def alerts():
 
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--profile', choices=('default', 'generic'), default='default')
+    parser.add_argument('--context', help='Required explicit allowlisted local context for generic mode')
+    # Parse only profile flags first: release choices must not depend on a
+    # previous invocation's mutable module configuration.
+    selector = argparse.ArgumentParser(add_help=False)
+    selector.add_argument('--profile', choices=('default', 'generic'), default='default')
+    selected, _ = selector.parse_known_args(argv)
+    services = [*manifests.DEFAULT_APPS]
+    if selected.profile == 'generic':
+        services.extend(manifests.GENERIC_APPS)
+    services.extend(('frontend', 'gateway'))
     commands = parser.add_subparsers(dest='command', required=True)
-    for command in ('secrets', 'build', 'up', 'check', 'status', 'stop', 'start', 'cluster-identity', 'bootstrap-admin', 'backup', 'schedule-backups', 'schema-gate', 'persistence', 'repair-certificates', 'alerts', 'mailpit', 'prometheus', 'grafana', 'tempo', 'helm-adopt', 'releases'):
+    for command in ('secrets', 'build', 'up', 'check', 'status', 'stop', 'start', 'cluster-identity', 'bootstrap-owner', 'backup', 'schedule-backups', 'schema-gate', 'persistence', 'repair-certificates', 'alerts', 'mailpit', 'prometheus', 'grafana', 'tempo', 'gateway', 'gateway-http', 'helm-adopt', 'releases'):
         commands.add_parser(command)
 
     def backup_path(value):
@@ -731,12 +859,12 @@ def parse_arguments(argv=None):
             raise argparse.ArgumentTypeError('timeout must be between 1 and 3600 seconds')
         return seconds
     release = commands.add_parser('release')
-    release.add_argument('--service', choices=[*manifests.APPS, 'frontend', 'gateway'], required=True)
+    release.add_argument('--service', choices=services, required=True)
     release.add_argument('--image', type=image_reference, required=True)
     release.add_argument('--probe', type=business_probe, required=True)
     release.add_argument('--timeout', type=release_timeout, default=240)
     rollback = commands.add_parser('release-rollback')
-    rollback.add_argument('--service', choices=[*manifests.APPS, 'frontend', 'gateway'], required=True)
+    rollback.add_argument('--service', choices=services, required=True)
     rollback.add_argument('--revision', type=release_timeout, required=True)
     rollback.add_argument('--probe', type=business_probe, required=True)
     rollback.add_argument('--timeout', type=release_timeout, default=240)
@@ -745,6 +873,12 @@ def parse_arguments(argv=None):
 
 def main():
     args = parse_arguments()
+    configure_profile(args.profile, args.context)
+    if PROFILE == 'generic' and args.command in ('stop', 'start', 'cluster-identity', 'helm-adopt', 'schedule-backups', 'schema-gate', 'persistence', 'chaos', 'repair-certificates', 'rekey'):
+        raise RuntimeError('Generic namespace-only profile forbids cluster/global/legacy maintenance commands')
+    if PROFILE == 'generic' and args.command not in ('secrets', 'build', 'up'):
+        from cluster_identity import guard
+        guard(sys.modules[__name__])
     require_tools()
     if args.command == 'secrets': create_secrets(STATE); print('Local secrets generated or retained; no global trust installation.')
     elif args.command == 'build': build_images()
@@ -772,25 +906,25 @@ def main():
         from cluster_identity import guard
         guard(sys.modules[__name__], initialize=True)
         print('PASS original Kubernetes/etcd peer identity matches static Docker reservations; private baseline retained')
-    elif args.command == 'bootstrap-admin': bootstrap_admin()
+    elif args.command == 'bootstrap-owner': bootstrap_owner()
     elif args.command == 'backup':
         from fault_lifecycle import exclusive
         with exclusive(STATE, timeout=300):
             backup()
     elif args.command == 'restore-verify':
-        from fault_lifecycle import exclusive, wait_writable
+        from fault_lifecycle import exclusive
         with exclusive(STATE):
-            wait_writable(sys.modules[__name__])
+            wait_writable()
             restore_verify(args.backup)
     elif args.command == 'chaos':
-        from fault_lifecycle import exclusive, wait_writable
+        from fault_lifecycle import exclusive, wait_writable as wait_fault_writable
         with exclusive(STATE):
             try:
                 chaos(args.target, args.probe)
             except BaseException:
                 if args.target == 'postgres':
                     try:
-                        wait_writable(sys.modules[__name__])
+                        wait_fault_writable(sys.modules[__name__])
                     except Exception as recovery_error:
                         print('PostgreSQL recovery still pending; no further injection allowed until Ready writable primary.', file=sys.stderr)
                 raise
@@ -818,7 +952,14 @@ def main():
     elif args.command == 'schedule-backups':
         from backup_schedule import install
         install()
-    else: port_forward(args.command, {'mailpit': 28026, 'prometheus': 29090, 'grafana': 23000, 'tempo': 23200}[args.command])
+    else:
+        ports = {'mailpit': 38026 if PROFILE == 'generic' else 28026,
+                 'prometheus': 39090 if PROFILE == 'generic' else 29090,
+                 'grafana': 33000 if PROFILE == 'generic' else 23000,
+                 'tempo': 33200 if PROFILE == 'generic' else 23200,
+                 'gateway': 18448 if PROFILE == 'generic' else 8448,
+                 'gateway-http': 18089 if PROFILE == 'generic' else 8089}
+        port_forward(args.command, ports[args.command])
 
 
 if __name__ == '__main__':

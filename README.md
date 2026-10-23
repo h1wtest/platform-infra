@@ -13,7 +13,7 @@ make bootstrap
 make build
 make up
 make check
-make bootstrap-admin
+make bootstrap-owner
 make mailpit       # отдельный терминал, loopback127.0.0.1:28026
 make prometheus    # отдельный терминал, loopback127.0.0.1:29090
 make grafana       # отдельный терминал, loopback127.0.0.1:23000
@@ -151,7 +151,7 @@ Rate limits не изменяются: 20 попыток за 10 минут на
 | `check`, `status` | Readiness + strict discovery / listing pods,PVC,services,HPA,PDB. |
 | `stop`, `start` | Остановить/запустить только isolated k3d cluster; durable volumes сохранены; после `start` отдельно `check`. |
 | `cluster-identity` | Read-only Docker/K8s проверка исходных трёх peers; один раз создать private `.local/cluster-identity.json`, далее только сверять, никогда не перезаписывать. |
-| `bootstrap-admin` | Реальный identity Job; действующая DB/schema/images; credentials остаются локально, далее MFA. |
+| `bootstrap-owner` | Реальный identity Job; действующая DB/schema/images; credentials остаются локально, далее MFA. |
 | `schedule-backups` | Установить/enable hourly systemd user timer; работающий user manager; это persistent host configuration. |
 | `backup` | Encrypted logical snapshots всех owner DB под fault lock; готовый writable primary и backup key. |
 | `restore-verify BACKUP=...` | Обязателен один complete backup directory; disposable DB restore/hash comparison; исходные DB не перезаписываются. |
@@ -166,7 +166,7 @@ Rate limits не изменяются: 20 попыток за 10 минут на
 | `acceptance GATE=... ARGS=...` | Реальные API/security/fault/load gates; default `core`, prerequisite/sequence в [docs/acceptance.md](docs/acceptance.md). |
 | `host-fault ALLOW_SHARED_HOST_OUTAGE=1` | **Весь Docker Desktop host**, включая чужие containers (`dsh-hindsight`): Windows external Python observer/backend crash/recovery через thin PowerShell wrapper; только после явного разрешения владельца, без concurrent jobs/faults. Без flag script должен отказать до mutation. Нужны WSL interop, `wslpath`, `powershell.exe`, Windows Python3 launcher `py.exe -3`, Docker Desktop. Это не независимая host HA. |
 
-Рекомендуемый порядок: contracts `generate`/`test`/две schema `compatibility`; infra `test` → `bootstrap` → `build` → `up` → `status` → `check` → `bootstrap-admin` → `schema-gate` → `backup` → `restore-verify` → `alerts`; затем port-forwards и acceptance core/дополнительные gates; затем по одному `persistence`/`chaos` с `check` и business probe после каждого. `stop` → `start` → дождаться `check` → возобновить port-forwards → business probe. Shared-host outage — отдельный согласованный этап после backup/restore, не вместе со сборками, scheduled backup или другими faults. `repair-certificates` и обе формы `rekey` проверяются только на соответствующих безопасных legacy fixtures, не через создание legacy key в рабочем stand. `schedule-backups` проверяется отдельно по active timer, реальному service execution и timer trigger; перед faults не допускайте concurrent backup.
+Рекомендуемый порядок: contracts `generate`/`test`/две schema `compatibility`; infra `test` → `bootstrap` → `build` → `up` → `status` → `check` → `bootstrap-owner` → `schema-gate` → `backup` → `restore-verify` → `alerts`; затем port-forwards и acceptance core/дополнительные gates; затем по одному `persistence`/`chaos` с `check` и business probe после каждого. `stop` → `start` → дождаться `check` → возобновить port-forwards → business probe. Shared-host outage — отдельный согласованный этап после backup/restore, не вместе со сборками, scheduled backup или другими faults. `repair-certificates` и обе формы `rekey` проверяются только на соответствующих безопасных legacy fixtures, не через создание legacy key в рабочем stand. `schedule-backups` проверяется отдельно по active timer, реальному service execution и timer trigger; перед faults не допускайте concurrent backup.
 
 Host controller ограничивает subprocess deadlines и выполняет реальные per-node `/readyz`, NodeReady и CNPG operator gates, а не только доступность общего API. `scripts/acceptance/host_state.py` использует конкретный32hex run-id и isolated base/CA/state для prepare/readiness/verify/cleanup: сохранённый реальный profile/session и committed DB marker проверяются после recovery. Cleanup собственной fixture и восстановление исходного backup timer обязательны до PASS.
 
@@ -186,3 +186,66 @@ Host controller ограничивает subprocess deadlines и выполня�
 Whole-host helper сохраняет реальные Kafka acknowledgements и SHA256 key/value по точным topic/partition/offset, затем проверяет те же записи без нового produce или изменения consumer groups. Во втором фактическом VM fault после ручного восстановления совпали все6RF3 partition markers и46выборочных исторических записей. Проверка также сохранила исходную сессию, профиль и DB marker. Это подтверждённая сохранность проверенных данных после manual recovery, не автоматическое восстановление и не доказательство каждой записи. Маленькие owned Kafka records имеют retention24h; metadata topic сохранена.
 
 **Оба фактических whole-Docker-Desktop-host fault завершились FAIL. Новых host/WSL/Docker outage injections не выполнять.** Первый запуск потребовал ручного старта существующих nodes после cgroup admission error; второй привёл к потере Docker/Ubuntu WSL integration и перестановке динамических node IP, несовместимой с сохранёнными etcd peer identities. Штатный Desktop restart восстановил integration; возврат исходных адресов тем же containers как static IPAM и последовательное восстановление broker RPC сохранили PVCs, прежнюю session/profile/DB и проверенные Kafka records. После этого все3узла/API/etcd/CNPG/apps/broker quorum, HTTPS и core/admin acceptance прошли. Исходные FAIL reports сохранены; подробная последовательность и ограничения — `docs/acceptance.md`, актуальный статус публикации — `docs/handoff.md`. Identity guard предупреждает известный network drift без остановки сервисов, но не превращает два неуспешных автоматических восстановления в PASS.
+
+## Copyable source workspace
+
+Исходники шаблона — девять независимых Git repositories: `platform-infra`, `platform-contracts`, `identity-service`, `user-notification-service`, `frontend`, `catalog-service`, `billing-service`, `subscription-service`, `referral-service`. CLI требует Git, Python3.12+ и `uv`; он не требует Docker и не запускает исходные scripts/hooks/build/migrations. **Текущий `workspace.sources.json` честно помечает development inputs как local/unpublished: публичного pinned release и готовности remote clone пока нет.** Локальные незакоммиченные изменения не выдаются за опубликованный commit.
+
+Для fresh-copy проверки используйте отдельные reviewed clean Git repositories (или временные Git fixtures), содержащие реальные commits. Все local inputs передаются явно; `local_path` в сохранённом manifest — metadata, не автоматическое разрешение читать этот путь. Ни исходные owner `.env`, ни ignored build/runtime artifacts, ни source Git hooks не копируются. Не копируйте `.env` или весь исходный каталог вручную.
+
+```sh
+# Запускать из platform-infra; SOURCE_ROOT — существующий абсолютный путь к clean Git repositories.
+# Каждый repository должен иметь настоящий commit и не иметь nonignored uncommitted files.
+SOURCE_ROOT=/absolute/path/to/reviewed-sources
+PINNED=/absolute/path/to/new-workspace.pinned.json
+DESTINATION=/absolute/path/to/new-source-workspace
+# Parent каталоги PINNED и DESTINATION должны существовать; сами пути — ещё нет.
+set --
+for owner in platform-infra platform-contracts identity-service user-notification-service frontend catalog-service billing-service subscription-service referral-service; do
+  set -- "$@" --local "$owner=$SOURCE_ROOT/$owner"
+done
+uv run --no-project python scripts/workspace.py resolve \
+  --manifest workspace.sources.json --output "$PINNED" "$@"
+# Проверить реальные commit IDs в PINNED; resolve не создаёт workspace.
+uv run --no-project python scripts/workspace.py checkout \
+  --manifest "$PINNED" --destination "$DESTINATION" "$@"
+```
+
+`checkout` создаёт новый workspace с detached HEAD ровно на выбранном lowercase40 commit каждого owner и сохраняет выбранные sources в `DESTINATION/workspace.sources.json`. Движение исходного `HEAD` после resolve не меняет выбранный commit. Missing/duplicate owners, invalid SHA/URL, traversal, symlinks, dirty local inputs, tracked private/build paths и любой occupied destination (даже пустой) отклоняются; существующие данные не перезаписываются. Submodules и tracked symlinks требуют отдельного проектного решения и сейчас не поддержаны. Нет recursive source copy, автообновления main, выполнения arbitrary templates или source Git hooks. Git working-tree content берётся только из выбранных Git objects.
+
+Для публичного pinned release после **отдельно разрешённой фактической публикации** внесите настоящие `https://github.com/OWNER/REPO` URL во все entries, удалите `local`, `local_path`, поставьте `revision: null`, при желании `ref: "main"`. Команда `resolve --manifest published-sources.json --output release-sources.pinned.json` явно читает только `refs/heads/main` каждого remote и сохраняет реальные commit IDs в новый файл. Затем `checkout --manifest release-sources.pinned.json --destination /absolute/new-workspace` получает exact detached revisions, а не floating main. HTTPS URL не допускает credentials/query/fragment/port. Нельзя придумывать remote SHA для неопубликованных repositories или публиковать local path metadata. Reviewed совместимость этих commits и отдельно immutable image digests — обязанность выпуска; checkout не подтверждает application readiness или external-provider acceptance.
+
+Owner управляет публичной конфигурацией frontend через обычный `/config.json`, образец — `config.example.json`: `brand.name`, optional `brand.logo_url`/`brand.help_url`, `locales`, `default_locale`, `canonical_origin`. Поставьте собственный logo asset по указанному same-origin пути или удалите optional logo URL; help задаётся HTTPS URL. `canonical_origin` должен **точно** совпадать с реальным browser origin, например `https://localhost:18448` только для изолированного generic profile. Изменения конфигурации не меняют API transport origin и не исполняют JavaScript. Это только публичные значения, не provider credentials или purpose keys. Секреты создаются owner-specific bootstrap существующим delivery workflow, не source checkout. MIT распространяется на собственный код; third-party licenses/notices сохраняются. Перед публикацией нужен redacted full-history secret review; path exclusions не заменяют secret scan. Подробнее: `SECURITY.md` и `CONTRIBUTING.md`.
+
+Поведенческие Git/filesystem regressions: `uv run --no-project python -m unittest discover -s scripts/tests -p 'test_workspace.py'`. Эта проверка не заменяет общий integration/build/runtime/browser acceptance; текущие delivery commands и требования перечислены выше.
+
+## Изолированный generic profile
+
+Этот режим предназначен только для локальной приёмки: фиксированный namespace `generic-subscriptions` в явно выбранном `k3d-sso-remediation`, HTTPS18448/HTTP18089 через loopback port-forward. Он не создаёт, не стартует, не останавливает cluster и не меняет исходный namespace, его operator/RBAC/webhooks, PVC или owner `.env`. Namespace создаётся эксклюзивно, затем private create-once `.generic-local/namespace-identity.json` связывает HTTPS loopback API, UID `kube-system` и UID собственного namespace. Уже существующий namespace без matching baseline не усыновляется; drift не исправляется автоматически.
+
+```sh
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation secrets
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation build
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation up
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation bootstrap-owner
+# Каждый forward — отдельный terminal/process.
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation gateway
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation gateway-http
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation mailpit
+# После HTTPS-forward:
+uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation check
+```
+
+Все canonical credentials/private keys этого режима находятся только в ignored `.generic-local/owners/<repository>/.env`; TLS mounts, CA, backup key и immutable image lock — в `.generic-local`. Не копируйте туда исходные `.env`. Первый bootstrap может принять process `OWNER_EMAIL`/`OWNER_PASSWORD`; затем редактируется isolated identity owner env с этими именами. Существующий default store сохраняет исторические `ADMIN_EMAIL`/`ADMIN_PASSWORD` bytes как legacy storage mapping, но runtime Job/CLI называется только `bootstrap-owner` и передаёт `OWNER_*`.
+
+Catalog8006, Billing8007, Subscription8008, Referral8009 имеют отдельные runtime/migration DB roles, DB, TLS private keys, service tokens, Kafka SCRAM identities и quarantine keys. Все8owner DB включены в существующие encrypted logical backup/restore commands; snapshots отдельные, не distributed atomic transaction. Generic PostgreSQL — **один локальный StatefulSet, не HA**, с собственным retained PVC и verify-full TLS. Это намеренный local-only вариант без изменения исходного namespace-scoped CNPG controller; исходный default profile сохраняет CNPG3. Проверен только image config: pinned PostgreSQL18.6 image имеет user26 и PostgreSQL18 binaries в PATH; запуск и реальная приёмка выполняются integration owner.
+
+Generic Redpanda использует поддержанный pinned binary reactor `--reactor-backend=epoll` только в `generic-subscriptions` (`localEpoll:true`); default profile не меняется. Это локальный performance/resource tradeoff: epoll networking уменьшает расход общего Linux AIO pool при параллельной работе исходных и новых brokers, но не даёт обещания production throughput. Disk DMA/fsync не отключаются: `--unsafe-bypass-fsync=false`, RF3 и broker durability policy сохранены. Global sysctl, исходные brokers и host не изменяются. Выбор подтверждён integration owner фактическим `--help-seastar` pinned binary; реальная readiness/produce/consume проверка обязательна отдельно.
+
+Prometheus собирает каждую Ready application replica отдельно через headless `<service>-metrics.<namespace>.svc.cluster.local` DNS A discovery, а не балансируемый Service VIP. Scrape pools имеют уникальные имена, общие labels `job=platform`, `app`, `service`, `owner`; `instance` — фактический podIP:port. HTTPS проверяет CA и canonical owner `server_name`, даже когда target — IP. Дополнительные API permissions/tokens не нужны. Полный application scrape config формируется из APPS в `release_values`; `observability/prometheus.yml` содержит только общий infrastructure base. Для counter/histogram acceptance нужны стабильные PodUID/restartCount и суммирование отдельных series, не смена replicas на1 или искусственные запросы.
+
+Optional `NOWPAYMENTS_API_KEY`/`NOWPAYMENTS_IPN_SECRET` задаются только в `.generic-local/owners/billing-service/.env`. При отсутствии не генерируются fake values: provider readiness/operations обязаны честно отказать. Default URL — официальный HTTPS API; fixture overrides/fixture workload принадлежат отдельной явной acceptance процедуре и не входят в обычный deploy. Telegram и external integrations остаются отдельными real-credential gates. `EXTERNAL_EVENT_INTEGRATIONS` разрешён только profile owner env; HMAC ingress идёт через private gateway9443 только от workload `integration-ingress`, не публичный gateway443; произвольный `/internal/` снаружи закрыт.
+
+Topic names берутся из contract registry: immutable legacy identity/notification v1 допускаются только для drain; новая envelope schema_version2 использует identity/profile/notification `.v2`, а новые business families catalog/billing/subscription/referral/external `.v1`. Grants exact topic/group без wildcard, encrypted commands читает только notification identity. Cluster IdempotentWrite нужен Kafka producer, но не даёт cross-owner topic WRITE. Provider HTTPS egress разрешён только profile/notification-worker/billing. Static render: `uv run --no-project python scripts/render.py --profile generic --output .generic-local/render.json`; output credential-bearing, не публиковать. Regression suite: `uv run --no-project python -m unittest discover -s scripts/tests -p 'test_*.py'`. Здесь не утверждается, что tests/build/render/runtime уже прошли.
+
+

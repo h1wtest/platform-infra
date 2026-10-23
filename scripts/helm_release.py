@@ -44,9 +44,27 @@ _MANAGED_BY = 'app.kubernetes.io/managed-by'
 _LAST_APPLIED = 'kubectl.kubernetes.io/last-applied-configuration'
 
 
+def configure():
+    global _NAMESPACE, _APPLICATIONS, _RELEASE_CHARTS, SERVICES
+    import manifests
+    import security_material
+    _NAMESPACE = manifests.NS
+    SERVICES = security_material.SERVICES
+    _APPLICATIONS = (*manifests.APPS, 'frontend', 'gateway')
+    _RELEASE_CHARTS = {'platform-config': 'platform-config', 'postgres': 'platform-postgres',
+                       'redpanda': 'platform-redpanda', 'mailpit': 'platform-mailpit',
+                       **{name: 'platform-monitoring' for name in _MONITORING},
+                       **{name: 'platform-service' for name in _APPLICATIONS}}
+
+
+configure()
+
+
 def _scope(runtime):
     if runtime.CONTEXT != _CONTEXT or runtime.NS != _NAMESPACE:
-        raise RuntimeError('Helm lifecycle is restricted to the original local context and namespace')
+        raise RuntimeError('Helm lifecycle is restricted to explicit local context and selected namespace')
+    if _NAMESPACE == 'generic-subscriptions' and Path(runtime.STATE).name != '.generic-local':
+        raise RuntimeError('Generic Helm lifecycle requires isolated .generic-local state')
 
 
 def _release(runtime, release):
@@ -175,13 +193,23 @@ def _allowed_inventory(release):
             'platform-ca', 'redpanda-bootstrap', 'identity-signing', 'database-superuser',
             'platform-secrets', 'gateway-identity', 'identity-database', 'profile-database',
             'notification-database', 'audit-database'}
+        if _NAMESPACE == 'generic-subscriptions':
+            secrets |= {'postgres-ca', 'catalog-database', 'billing-database',
+                        'subscription-database', 'referral-database',
+                        'catalog-readers', 'subscription-readers'}
         configs = {'redpanda-config', 'gateway-conf', 'prometheus-yml', 'alerts-yml',
                    'otel-yml', 'tempo-yml', 'grafana-datasources-yml',
                    'grafana-dashboards-yml', 'platform-dashboard-json'}
         policies = {'default-deny', 'allow-dns', 'allow-postgres', 'allow-postgres-kubernetes-api',
                     *('allow-' + name for name in (*_APPLICATIONS, 'redpanda', 'mailpit', *_MONITORING))}
+        if _NAMESPACE == 'generic-subscriptions':
+            policies.add('allow-integration-ingress')
         return {('Secret', name) for name in secrets} | {('ConfigMap', name) for name in configs} | {('NetworkPolicy', name) for name in policies}
     if release == 'postgres':
+        if _NAMESPACE == 'generic-subscriptions':
+            return {('StatefulSet', 'postgres'), ('Service', 'postgres'),
+                    ('Service', 'postgres-rw'), ('Service', 'postgres-ro'),
+                    ('ServiceAccount', 'postgres')}
         return {('Cluster', 'postgres')}
     kinds = {'Deployment', 'Service', 'ServiceAccount', 'PodDisruptionBudget', 'HorizontalPodAutoscaler'}
     if release == 'redpanda':
@@ -191,6 +219,8 @@ def _allowed_inventory(release):
         if release != 'otel-collector':
             kinds.add('PersistentVolumeClaim')
     result = {(kind, release) for kind in kinds}
+    if release in APPS:
+        result.add(('Service', release + '-metrics'))
     if release == 'gateway':
         result.add(('Service', 'gateway-public'))
     return result

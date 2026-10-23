@@ -5,12 +5,29 @@ from urllib.parse import quote
 NS = 'sso-remediation'
 APPS = {'identity-service': ('identity', 8001, 'identity'), 'profile-service': ('profile', 8002, 'profile'), 'notification-service': ('notification', 8003, 'notification'), 'notification-worker': ('worker', 8005, 'notification'), 'admin-audit-service': ('admin', 8004, 'audit')}
 DBS = ('identity', 'profile', 'notification', 'audit')
+GENERIC_APPS = {'catalog-service': ('catalog', 8006, 'catalog'),
+                'billing-service': ('billing', 8007, 'billing'),
+                'subscription-service': ('subscription', 8008, 'subscription'),
+                'referral-service': ('referral', 8009, 'referral')}
+DEFAULT_APPS = dict(APPS)
+DEFAULT_DBS = DBS
+
+
+def configure(namespace):
+    global NS, DBS
+    NS = namespace
+    APPS.clear()
+    APPS.update(DEFAULT_APPS)
+    if namespace == 'generic-subscriptions':
+        APPS.update(GENERIC_APPS)
+    DBS = DEFAULT_DBS + (('catalog', 'billing', 'subscription', 'referral')
+                         if namespace == 'generic-subscriptions' else ())
 
 
 def database_url(username, password, database):
     """Keep literal credentials inside URI components and require verified TLS."""
     return (f'postgresql://{quote(username, safe="")}:{quote(password, safe="")}'
-            f'@postgres-rw.sso-remediation.svc:5432/{quote(database, safe="")}'
+            f'@postgres-rw.{NS}.svc:5432/{quote(database, safe="")}'
             '?sslmode=verify-full&sslrootcert=/run/postgres/ca.crt')
 
 

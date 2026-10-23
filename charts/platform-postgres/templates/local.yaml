@@ -1,0 +1,19 @@
+{{/* SPDX-License-Identifier: MIT */}}
+{{- if .Values.localAcceptance }}
+{{- if ne .Release.Namespace "generic-subscriptions" }}{{ fail "Local acceptance PostgreSQL requires generic-subscriptions namespace" }}{{ end }}
+{{- $boot := `set -eu
+export PGDATA=/var/lib/postgresql/data/pgdata
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+  initdb --pgdata="$PGDATA" --username=postgres --pwfile=/run/password/password --auth-local=trust --auth-host=scram-sha-256
+  printf 'local all all trust\nhostssl all all 0.0.0.0/0 scram-sha-256\nhostssl all all ::/0 scram-sha-256\n' > "$PGDATA/pg_hba.conf"
+fi
+exec postgres -D "$PGDATA" -c listen_addresses='*' -c ssl=on -c ssl_cert_file=/run/tls/tls.crt -c ssl_key_file=/run/tls/tls.key -c ssl_ca_file=/run/tls/ca.crt -c password_encryption=scram-sha-256 -c max_connections=200 -c synchronous_commit=on
+` -}}
+{"apiVersion":"apps/v1","kind":"StatefulSet","metadata":{"name":"postgres","namespace":{{ .Release.Namespace | toJson }},"annotations":{"platform.local/availability":"single-instance-local-acceptance-not-ha"}},"spec":{"serviceName":"postgres","replicas":1,"podManagementPolicy":"OrderedReady","persistentVolumeClaimRetentionPolicy":{"whenDeleted":"Retain","whenScaled":"Retain"},"selector":{"matchLabels":{"app":"postgres"}},"template":{"metadata":{"labels":{"app":"postgres"}},"spec":{"serviceAccountName":"postgres","automountServiceAccountToken":false,"terminationGracePeriodSeconds":60,"securityContext":{"runAsNonRoot":true,"runAsUser":26,"runAsGroup":26,"fsGroup":26,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"postgres","image":{{ required "image required" .Values.image | toJson }},"command":["/bin/bash","-ec",{{ $boot | toJson }}],"ports":[{"containerPort":5432}],"resources":{"requests":{"cpu":"200m","memory":"256Mi"},"limits":{"cpu":"2","memory":"1Gi"}},"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}},"readinessProbe":{"exec":{"command":["pg_isready","-U","postgres","-d","postgres"]},"periodSeconds":5,"timeoutSeconds":3},"livenessProbe":{"exec":{"command":["pg_isready","-U","postgres","-d","postgres"]},"periodSeconds":15,"timeoutSeconds":3},"startupProbe":{"exec":{"command":["pg_isready","-U","postgres","-d","postgres"]},"periodSeconds":5,"failureThreshold":60},"volumeMounts":[{"name":"data","mountPath":"/var/lib/postgresql/data"},{"name":"tmp","mountPath":"/tmp"},{"name":"socket","mountPath":"/var/run/postgresql"},{"name":"tls","mountPath":"/run/tls","readOnly":true},{"name":"password","mountPath":"/run/password","readOnly":true}]}],"volumes":[{"name":"tmp","emptyDir":{}},{"name":"socket","emptyDir":{}},{"name":"tls","secret":{"secretName":"postgres-tls","defaultMode":288}},{"name":"password","secret":{"secretName":"database-superuser","defaultMode":288}}]}},"volumeClaimTemplates":[{"metadata":{"name":"data","annotations":{"helm.sh/resource-policy":"keep"}},"spec":{"accessModes":["ReadWriteOnce"],"storageClassName":"local-path","resources":{"requests":{"storage":"4Gi"}}}}]}}
+---
+{"apiVersion":"v1","kind":"ServiceAccount","metadata":{"name":"postgres","namespace":{{ .Release.Namespace | toJson }}},"automountServiceAccountToken":false}
+{{ range list "postgres" "postgres-rw" "postgres-ro" }}
+---
+{"apiVersion":"v1","kind":"Service","metadata":{"name":{{ . | toJson }},"namespace":{{ $.Release.Namespace | toJson }}},"spec":{"selector":{"app":"postgres"},"ports":[{"name":"postgres","port":5432,"targetPort":5432}]{{ if eq . "postgres" }},"clusterIP":"None"{{ end }}}}
+{{ end }}
+{{- end }}

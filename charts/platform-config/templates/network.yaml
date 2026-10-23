@@ -6,33 +6,53 @@
 {{- end -}}
 {{- $ns := .Release.Namespace -}}
 {{- $local := dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $ns)) -}}
-{{- $db := merge (dict "podSelector" (dict "matchLabels" (dict "cnpg.io/cluster" "postgres"))) $local -}}
+{{- $db := merge (dict "podSelector" (dict "matchLabels" (dict (ternary "app" "cnpg.io/cluster" (eq $ns "generic-subscriptions")) "postgres"))) $local -}}
 {{- $apps := list -}}{{- range .Values.applications }}{{ $apps = append $apps .name }}{{ end -}}
+{{- $callers := dict "identity-service" (list "profile-service" "notification-service" "notification-worker" "admin-audit-service" "catalog-service" "billing-service" "subscription-service" "referral-service") "profile-service" (list "notification-service" "notification-worker" "admin-audit-service" "integration-ingress") "notification-service" (list "profile-service" "admin-audit-service") "notification-worker" (list) "admin-audit-service" (list) "catalog-service" (list "billing-service" "subscription-service") "billing-service" (list "profile-service" "subscription-service") "subscription-service" (list "billing-service" "profile-service" "notification-worker") "referral-service" (list "identity-service" "billing-service" "profile-service") -}}
+{{- $destinations := dict "identity-service" (list "referral-service") "profile-service" (list "notification-service" "billing-service" "subscription-service" "referral-service") "notification-service" (list "profile-service") "notification-worker" (list "profile-service" "subscription-service" "mailpit") "admin-audit-service" (list "profile-service" "notification-service") "catalog-service" (list) "billing-service" (list "catalog-service" "subscription-service" "referral-service") "subscription-service" (list "catalog-service" "billing-service") "referral-service" (list) -}}
+{{- $ports := dict "identity-service" 8001 "profile-service" 8002 "notification-service" 8003 "notification-worker" 8005 "admin-audit-service" 8004 "catalog-service" 8006 "billing-service" 8007 "subscription-service" 8008 "referral-service" 8009 "redpanda" 29092 "otel-collector" 4318 "mailpit" 1025 -}}
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"default-deny","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{},"policyTypes":["Ingress","Egress"]}}
 ---
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-dns","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{}},"policyTypes":["Egress"],"egress":[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}],"ports":[{"protocol":"UDP","port":53},{"protocol":"TCP","port":53}]}]}}
 {{ range .Values.applications }}
 ---
+{{ if eq $ns "generic-subscriptions" }}
+{{ $egress := list (dict "to" (list $db) "ports" (list (dict "protocol" "TCP" "port" 5432))) }}
+{{ range $peer := concat (list "identity-service" "redpanda" "otel-collector") (index $destinations .name) }}
+{{ $egress = append $egress (dict "to" (include "platform.peers" (list $ns (list $peer)) | fromJsonArray) "ports" (list (dict "protocol" "TCP" "port" (index $ports $peer)))) }}
+{{ end }}
+{{ if has .name (list "profile-service" "notification-worker" "billing-service") }}
+{{ $egress = append $egress (dict "to" (list (dict "ipBlock" (dict "cidr" "0.0.0.0/0" "except" (list "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.0/8" "169.254.0.0/16")))) "ports" (list (dict "protocol" "TCP" "port" 443))) }}
+{{ end }}
+{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":{{ printf "allow-%s" .name | toJson }},"namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":{{ .name | toJson }}}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (concat (list "gateway" "prometheus") (index $callers .name))) }},"ports":[{"protocol":"TCP","port":{{ .port }}}]}],"egress":{{ $egress | toJson }}}}
+{{ else }}
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":{{ printf "allow-%s" .name | toJson }},"namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":{{ .name | toJson }}}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (concat (list "gateway" "prometheus") $apps)) }},"ports":[{"port":{{ .port }}}]}],"egress":[{"to":{{ include "platform.peers" (list $ns (list "redpanda" "otel-collector" "identity-service" "profile-service" "notification-service" "mailpit")) }},"ports":[{"protocol":"TCP","port":29092},{"protocol":"TCP","port":4318},{"protocol":"TCP","port":8001},{"protocol":"TCP","port":8002},{"protocol":"TCP","port":8003},{"protocol":"TCP","port":1025}]},{"to":[{{ $db | toJson }}],"ports":[{"port":5432}]}{{ if or (eq .name "profile-service") (eq .name "notification-worker") }},{"to":[{"ipBlock":{"cidr":"0.0.0.0/0","except":["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]}}],"ports":[{"port":443}]}{{ end }}]}}
+{{ end }}
 {{ end }}
 ---
 {{ $databasePeers := include "platform.peers" (list $ns $apps) | fromJsonArray }}
 {{ $databasePeers = append $databasePeers $db }}
-{{ $databasePeers = append $databasePeers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" "cnpg-system"))) }}
-{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-postgres","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"cnpg.io/cluster":"postgres"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ $databasePeers | toJson }},"ports":[{"port":5432},{"port":8000},{"port":9187}]}],"egress":[{"to":[{{ $db | toJson }}],"ports":[{"port":5432}]}]}}
+{{ if ne $ns "generic-subscriptions" }}{{ $databasePeers = append $databasePeers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" "cnpg-system"))) }}{{ end }}
+{{ $databasePorts := list (dict "protocol" "TCP" "port" 5432) }}{{ if ne $ns "generic-subscriptions" }}{{ $databasePorts = concat $databasePorts (list (dict "port" 8000) (dict "port" 9187)) }}{{ end }}
+{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-postgres","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{{ $db.podSelector | toJson }},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ $databasePeers | toJson }},"ports":{{ $databasePorts | toJson }}}],"egress":[{"to":[{{ $db | toJson }}],"ports":[{"port":5432}]}]}}
 {{ if .Values.apiNetworkPolicy }}
 {{ $apiRules := .Values.apiNetworkPolicy.spec.egress }}
 ---
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-postgres-kubernetes-api","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"cnpg.io/cluster":"postgres"}},"policyTypes":["Egress"],"egress":{{ $apiRules | toJson }}}}
 {{ end }}
 ---
-{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-redpanda","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"redpanda"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (list "identity-service" "profile-service" "notification-service" "admin-audit-service" "redpanda")) }},"ports":[{"port":29092}]},{"from":{{ include "platform.peers" (list $ns (list "redpanda")) }},"ports":[{"port":33145}]},{"from":{{ include "platform.peers" (list $ns (list "prometheus")) }},"ports":[{"port":9644}]}],"egress":[{"to":{{ include "platform.peers" (list $ns (list "redpanda")) }},"ports":[{"port":33145}]}]}}
+{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-redpanda","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"redpanda"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (append $apps "redpanda")) }},"ports":[{"protocol":"TCP","port":29092}]},{"from":{{ include "platform.peers" (list $ns (list "redpanda")) }},"ports":[{"protocol":"TCP","port":33145}]},{"from":{{ include "platform.peers" (list $ns (list "prometheus")) }},"ports":[{"protocol":"TCP","port":9644}]}],"egress":[{"to":{{ include "platform.peers" (list $ns (list "redpanda")) }},"ports":[{"protocol":"TCP","port":33145}]}]}}
 ---
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-mailpit","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"mailpit"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (list "notification-worker")) }},"ports":[{"port":1025}]}],"egress":[]}}
 ---
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-frontend","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"frontend"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (list "gateway")) }},"ports":[{"port":8080}]}],"egress":[]}}
 ---
-{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-gateway","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"gateway"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}}},{"ipBlock":{"cidr":"0.0.0.0/0"}}],"ports":[{"port":8443},{"port":8080}]}],"egress":[{"to":{{ include "platform.peers" (list $ns $apps) }},"ports":[{"port":8001},{"port":8002},{"port":8003},{"port":8004}]},{"to":{{ include "platform.peers" (list $ns (list "frontend")) }},"ports":[{"port":8080}]}]}}
+{{ $gatewayPorts := list }}{{ range $.Values.applications }}{{ $gatewayPorts = append $gatewayPorts (dict "protocol" "TCP" "port" .port) }}{{ end }}
+{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-gateway","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"gateway"}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}}},{"ipBlock":{"cidr":"0.0.0.0/0"}}],"ports":[{"port":8443},{"port":8080}]}],"egress":[{"to":{{ include "platform.peers" (list $ns $apps) }},"ports":{{ $gatewayPorts | toJson }}},{"to":{{ include "platform.peers" (list $ns (list "frontend")) }},"ports":[{"port":8080}]}]}}
+{{ if eq $ns "generic-subscriptions" }}
+---
+{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"allow-integration-ingress","namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":"gateway"}},"policyTypes":["Ingress"],"ingress":[{"from":{{ include "platform.peers" (list $ns (list "integration-ingress")) }},"ports":[{"protocol":"TCP","port":9443}]}]}}
+{{ end }}
 {{ range list "prometheus" "grafana" "tempo" "otel-collector" }}
 ---
 {"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":{{ printf "allow-%s" . | toJson }},"namespace":{{ $ns | toJson }}},"spec":{"podSelector":{"matchLabels":{"app":{{ . | toJson }}}},"policyTypes":["Ingress","Egress"],"ingress":[{"from":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":{{ $ns | toJson }}}},"podSelector":{}}]}],"egress":[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":{{ $ns | toJson }}}},"podSelector":{}}]}]}}

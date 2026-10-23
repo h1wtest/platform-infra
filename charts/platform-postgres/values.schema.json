@@ -3,6 +3,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "localAcceptance": {"type": "boolean"},
     "name": {
       "const": "postgres"
     },

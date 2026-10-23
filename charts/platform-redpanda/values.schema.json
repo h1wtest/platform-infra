@@ -3,6 +3,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "localEpoll": {"type": "boolean"},
     "name": {
       "const": "redpanda"
     },

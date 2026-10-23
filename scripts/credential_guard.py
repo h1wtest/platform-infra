@@ -12,6 +12,15 @@ IMMUTABLE_KEYS = ('postgres_password', 'kafka_bootstrap_password', *PURPOSE_KEYS
                     for role in ('runtime', 'migration')))
 
 
+def configure():
+    global IMMUTABLE_KEYS
+    import env_secrets
+    import manifests
+    IMMUTABLE_KEYS = ('postgres_password', 'kafka_bootstrap_password', *env_secrets.PURPOSE_KEYS,
+                      *(database + '_' + role + '_password' for database in manifests.DBS
+                        for role in ('runtime', 'migration')))
+
+
 def verify(runtime, values):
     """Read existing runtime material before any Secret apply; never mutate it."""
     body = runtime.kube('get', 'secret', 'platform-secrets', '--ignore-not-found=true', '-o', 'json').stdout

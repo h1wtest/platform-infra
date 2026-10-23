@@ -12,6 +12,73 @@ LOADBALANCER = NETWORK + '-serverlb'
 TOOLS = NETWORK + '-tools'
 CONTAINERS = (*SERVERS, LOADBALANCER)
 FILENAME = 'cluster-identity.json'
+GENERIC_CONTEXTS = frozenset({'k3d-sso-remediation'})
+GENERIC_NAMESPACE = 'generic-subscriptions'
+
+
+def namespace_snapshot(context, server, cluster_uid, namespace):
+    """Bind the explicit local API and owned namespace; no Docker baseline mutation."""
+    from urllib.parse import urlsplit
+    if context not in GENERIC_CONTEXTS:
+        fail('generic context is not allowlisted')
+    parsed = urlsplit(server)
+    if parsed.scheme != 'https' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1') or parsed.username or parsed.password or parsed.path not in ('', '/'):
+        fail('generic API must be an explicit HTTPS loopback endpoint')
+    metadata = namespace.get('metadata', {})
+    if metadata.get('name') != GENERIC_NAMESPACE or metadata.get('labels', {}).get('platform.local/profile') != 'generic' or not metadata.get('uid') or not cluster_uid:
+        fail('generic namespace ownership is absent or invalid')
+    return {'schema': 1, 'context': context, 'server': server, 'cluster_uid': cluster_uid,
+            'namespace': GENERIC_NAMESPACE, 'namespace_uid': metadata['uid']}
+
+
+def validate_namespace(expected, actual):
+    if expected != actual:
+        fail('generic namespace or API cluster identity differs from saved baseline')
+    return expected
+
+
+def guard_namespace(cli, initialize=False):
+    if cli.CONTEXT not in GENERIC_CONTEXTS or cli.NS != GENERIC_NAMESPACE or cli.STATE.name != '.generic-local':
+        fail('generic context/namespace/state scope mismatch')
+    prefix = ['kubectl', '--context', cli.CONTEXT]
+    config = json.loads(cli.run([*prefix, 'config', 'view', '--minify', '-o', 'json']).stdout)
+    clusters = config.get('clusters', [])
+    if len(clusters) != 1:
+        fail('generic context must select exactly one API cluster')
+    selected = clusters[0]['cluster']
+    if selected.get('insecure-skip-tls-verify') or selected.get('proxy-url'):
+        fail('generic API requires verified direct TLS without proxy override')
+    server = clusters[0]['cluster']['server']
+    # Validate transport before querying or mutating any API resources.
+    namespace_snapshot(cli.CONTEXT, server, 'preflight', {'metadata': {
+        'name': GENERIC_NAMESPACE, 'uid': 'preflight', 'labels': {'platform.local/profile': 'generic'}}})
+    cluster = json.loads(cli.run([*prefix, 'get', 'namespace', 'kube-system', '-o', 'json']).stdout)
+    result = cli.run([*prefix, 'get', 'namespace', GENERIC_NAMESPACE,
+                      '--ignore-not-found=true', '-o', 'json']).stdout
+    path = cli.STATE / 'namespace-identity.json'
+    if result.strip() and not path.exists():
+        fail('existing generic namespace has no saved ownership baseline; adoption refused')
+    if not result.strip():
+        if not initialize or path.exists():
+            fail('owned generic namespace is missing; recreation over retained state refused')
+        document = {'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': GENERIC_NAMESPACE,
+            'labels': {'platform.local/profile': 'generic', 'pod-security.kubernetes.io/enforce': 'restricted',
+                       'pod-security.kubernetes.io/enforce-version': 'v1.33'}}}
+        # create is exclusive: concurrent foreign namespace creation cannot be adopted.
+        cli.run([*prefix, 'create', '-f', '-'], input=json.dumps(document).encode())
+        result = cli.run([*prefix, 'get', 'namespace', GENERIC_NAMESPACE, '-o', 'json']).stdout
+    actual = namespace_snapshot(cli.CONTEXT, server, cluster['metadata']['uid'], json.loads(result))
+    if path.exists():
+        if path.is_symlink() or (os.name != 'nt' and path.stat().st_mode & 0o377):
+            fail('generic baseline must be a private read-only regular file')
+        envelope = json.loads(path.read_text())
+        if not hmac.compare_digest(envelope['sha256'], digest(envelope['identity'])):
+            fail('generic baseline integrity mismatch')
+        return validate_namespace(envelope['identity'], actual)
+    if not initialize:
+        fail('missing generic namespace baseline; use explicit generic up')
+    record(path, actual)
+    return actual
 
 
 def fail(detail):
@@ -213,6 +280,10 @@ def inspect(cli):
 
 
 def guard(cli, *, live=True, initialize=False):
+    if getattr(cli, 'NS', None) == GENERIC_NAMESPACE:
+        if not live:
+            fail('generic namespace-only profile cannot start cluster peers')
+        return guard_namespace(cli, initialize)
     path = cli.STATE / FILENAME
     # A missing manifest blocks start before any mutation, even when K8s is down.
     baseline = None if initialize and not path.exists() else load(path)

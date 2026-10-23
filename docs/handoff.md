@@ -1,6 +1,37 @@
-# Local remediation and release handoff
+# Generic subscription platform — current local implementation handoff
 
-## Current state
+## Current task scope and authority — 2026-10-24
+
+The generic platform design was approved for implementation in the archived conversation context. Work is implemented in isolated task worktrees under `/home/bpqvg/dev/h1wtest-worktrees/generic-subscription-platform`; current phase is integrated **local acceptance**, not a published release. The nine executable/source owners are platform-infra, platform-contracts, identity-service, user-notification-service, frontend, catalog-service, billing-service, subscription-service and referral-service. The tenth task directory, admin-cloud-service, documents the one actual runtime in user-notification-service/cmd/admin; it is not a second admin deployment.
+
+Current local target is namespace `generic-subscriptions`, HTTPS `https://localhost:18448`, HTTP18089 and Mailpit38026. All canonical task credentials/private material and acceptance evidence belong to ignored `platform-infra/.generic-local`, with owner env under `.generic-local/owners/<repository>/.env`. No original namespace `sso-remediation`, retained PVC, original repository `.env` or old acceptance identity may be modified or reused as proof for this task. Generic PostgreSQL is a separate single-instance local acceptance database, explicitly not HA. Broker epoll networking is generic-only; original brokers and global sysctls remain unchanged.
+
+Use `uv run --no-project python scripts/cli.py --profile generic --context k3d-sso-remediation <command>` from this task's platform-infra checkout; use separate explicit gateway/gateway-http/mailpit loopback forwards and trust only the task CA. Strict API context/TLS/namespace-UID guards remain enabled. A private kubeconfig selecting the verified loopback API may be used without changing original kubeconfig/current context. Do not run the historical default-profile commands below against the retained original stand as part of this acceptance.
+
+Approval to implement is **not** permission for remote repository creation, push, PR, merge, publication, external deployment, cloud or production operations. The historical 2026-10-23 main-integration permission and old PR receipts below do not carry over. No real payouts/money transfers or whole-host/Docker Desktop faults are authorized. Source commits, final selected image identities, synchronized digests and clean immutable export receipts remain pending the parent integration owner's final source freeze; none are fabricated here.
+
+## Current evidence ledger — parent final reconciliation required
+
+The parent tracker reported23/40tasks DONE at this documentation checkpoint; that is not an all-task completion statement and is not a fabricated per-task status map. This ledger records only received observations; the final task register/evidence reconciliation belongs to the parent after local gates finish.
+
+| Scope | Received evidence / remaining requirement |
+|---|---|
+| Infrastructure regressions | Parent reported228tests PASS/3skip in48.393s before latest acceptance/documentation reconciliation; this is a dated checkpoint, not a blanket final-source pass. |
+| Private build contexts | Actual Docker root+six backend override exports passed; private sentinel exclusion verified separately from source text inspection. |
+| Generic state isolation | Separate namespace/owner store and original-stand restrictions reviewed; independent static isolation review reported no remaining Critical/Important findings in its scope. |
+| PostgreSQL/Kafka | Parent observed local generic PostgreSQL Ready; all3generic brokers healthy with no leaderless/underreplicated partitions after scoped crash-counter diagnostic preservation and supported epoll recovery. No independent-host HA claim. |
+| Backups | Parent observed encrypted8owner DB backup PASS44.27s; final restore/hash result and complete current runtime evidence require parent reconciliation. |
+| API/UI/observability/fault matrix | Parent reports actual isolation30checks PASS281.33s and causal network guard PASS35.05s; new-email fresh-profile BrowserSecurity path passed. Per-pod observability6checks/all9trace services PASS17.83s after corrected Prometheus rollout24.74s, including all4business owner counter/histogram deltas across2Ready replicas, target coverage and fresh assigned lag. Remaining full UI/atomic fault matrices and task reconciliation are not closed by these receipts; fault smoke is not yet claimed. |
+| V03 real providers | OPEN: current-task real NOWPayments sandbox keys/callback and real Telegram bot/chat/public HTTPS prerequisites are not established by this ledger. Deterministic fixture/Mailpit results do not close external provider acceptance. Historical Telegram evidence below does not prove the new task's V03. |
+| Final source/publication | Final commits/images/provenance/history-secret review and clean export receipts pending; no remote publication operation authorized or claimed. |
+
+Current acceptance criteria remain in the approved generic design/task register. Secret-bearing raw reports stay private; do not copy owner env, keys, callback tokens, private captures or provider payloads into this handoff. Parent should replace checkpoint statements only with exact current evidence; do not infer all gates PASS from worker readiness or prior-main history.
+
+Everything below is preserved **historical 2026-10-23 remediation material**. Its “current” wording, workspaces, URLs, permissions, scan outcomes, remote receipts, tests and external-provider observations apply only to that old checkpoint, not this generic implementation or its authorization.
+
+## Historical 2026-10-23 remediation — preserved evidence, not current authorization
+
+### Historical state at the 2026-10-23 checkpoint
 
 Implementation workspace: `/home/bpqvg/dev/h1wtest-remediation`. The owner authorized integrating all prepared changes into each repository's `main` and synchronizing clean primary checkouts on 2026-10-23. Public organization: https://github.com/h1wtest . This authorization does not include deployment or cloud/production operations. Integration receipts: [identity PR3](https://github.com/h1wtest/identity-service/pull/3), [notifications PR3](https://github.com/h1wtest/user-notification-service/pull/3), [infrastructure PR2](https://github.com/h1wtest/platform-infra/pull/2); their current GitHub state and `origin/main` are authoritative.
 
@@ -25,7 +56,7 @@ Current acceptance scope is local development only. The user explicitly excluded
 
 The owner subsequently explicitly removed vulnerability scanning of images and dependencies from the entire ecosystem and from acceptance criteria. Do not run or reinstate these scanners. Preserve actual patched images/dependencies, RBAC/TLS/secret/configuration checks and behavioral tests. Historical scan results below are historical evidence only; scanner removal does not establish vulnerability absence.
 
-## Executed application and remote checks
+### Historical executed application and remote checks
 
 Permanent actual acceptance harness: `scripts/acceptance`; detailed commands and observations: `docs/acceptance.md`.
 
@@ -39,7 +70,7 @@ Frontend35 behavioral tests, lint/format/typecheck/build and dependency audit pa
 
 Contracts generation, strict Go/Rust HTTP codecs, complete immutable-v1 compatibility, tests and complete source artifact passed. Main push/dispatch runs `39919640075` / `39919642448` passed. Service CI pins the approved immutable contracts commit `665c565bd0a00f30027b429129b22d91f99ef6b0`; later main changes only update verified Node24 workflow action pins.
 
-## Whole Docker-host failure: automatic recovery FAILED; manual recovery verified
+### Historical whole Docker-host failure: automatic recovery FAILED; manual recovery verified
 
 Two explicitly approved abrupt Docker Desktop WSL VM failures were executed. Both remain **FAIL**, not successful autonomous recovery:
 
@@ -54,7 +85,7 @@ After recovery, run `98e7f41d18244ac7b30bc23a33a6dc3a` verified the **same pre-f
 
 Evidence remains private in `.local/acceptance`: both failed host reports, correlated business evidence and broker diagnostics. `make check` subsequently passed; SSO returned HTTPS200 with explicit CA. Docker/Ubuntu integration and unrelated `dsh-hindsight` were running.
 
-## Current local release criteria
+### Historical local release criteria
 
 Vulnerability image/dependency scanning has been deleted by explicit owner instruction. Existing local source/image provenance, tests, secret checks, IaC/schema/monitoring validation and real business acceptance remain required. `docs/security-images.md` is an archived investigation, not an instruction to rerun scanners or a current merge blocker. Previously implemented genuine package/module/CA fixes remain selected; no security patch or access-control rollback accompanies this policy change.
 
@@ -64,13 +95,13 @@ Grafana now ships complete signed, checksum-pinned Prometheus/Tempo plugins and 
 
 Earlier infrastructure CI runs genuinely failed the former vulnerability gate. Those results are not relabeled; new workflows no longer include that owner-excluded gate. Current required checks must pass before integration. Existing Kubernetes1.35.5 nodes are retained; no node upgrade, host fault or external deployment is part of this local task.
 
-## Other boundaries
+### Historical other boundaries
 
 - Genuine Telegram linking/login-alert delivery passed with a real bot/private chat and secret-authenticated webhook. Current webhook ingress is a temporary ngrok tunnel exposing only the webhook route; unattended tunnel availability is not certified. Bot API acceptance is not a human-read receipt.
 - No AWS/production, independent-host/zone failure, PITR, OIDC certification or long-term RPO guarantee.
 - Backups are authenticated encrypted logical snapshots. An active systemd user manager/host is required for the installed hourly timer; off-host durability is not established.
 
-## Operator commands
+### Historical operator commands — not the generic task invocation
 
 Use `make bootstrap`, `make build`, `make up`, `make check` from `platform-infra`. Start loopback operator forwards explicitly with `make mailpit`, `make prometheus`, `make grafana`, `make tempo`. `make restore-verify BACKUP=<specific complete path>` restores only unique disposable databases and compares source content. Missing/malformed arguments fail before cluster mutation.
 

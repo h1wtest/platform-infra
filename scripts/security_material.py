@@ -4,17 +4,32 @@ import os
 import secrets
 
 SERVICES = ('identity-service', 'profile-service', 'notification-service', 'notification-worker', 'admin-audit-service', 'gateway', 'redpanda')
+DEFAULT_SERVICES = SERVICES
+NAMESPACE = 'sso-remediation'
+
+
+def configure(namespace):
+    global SERVICES, NAMESPACE
+    NAMESPACE = namespace
+    SERVICES = DEFAULT_SERVICES
+    if namespace == 'generic-subscriptions':
+        SERVICES += ('catalog-service', 'billing-service', 'subscription-service',
+                     'referral-service', 'postgres')
 
 
 def ensure(state, values, run, *, initialize=False):
     if 'encryption_key' in values:
         raise RuntimeError('Legacy shared encryption_key detected: startup refused. Explicit backup and transactional per-owner rekey are required before deleting the legacy key; never auto-generate replacements for existing ciphertext.')
-    for key in ('mfa_encryption_key', 'delivery_encryption_key', 'profile_quarantine_key', 'notification_quarantine_key', 'admin_quarantine_key'):
+    import env_secrets
+    for key in env_secrets.PURPOSE_KEYS:
         if key not in values:
             if not initialize:
                 raise RuntimeError('Missing existing encryption key: ' + key)
             values[key] = base64.b64encode(secrets.token_bytes(32)).decode()
-    for role in ('bootstrap', 'identity', 'profile', 'notification', 'admin'):
+    roles = ('bootstrap', 'identity', 'profile', 'notification', 'admin')
+    if NAMESPACE == 'generic-subscriptions':
+        roles += ('catalog', 'billing', 'subscription', 'referral')
+    for role in roles:
         key = 'kafka_' + role + '_password'
         if key not in values:
             if not initialize:
@@ -31,12 +46,15 @@ def ensure(state, values, run, *, initialize=False):
                 continue
             if not initialize:
                 raise RuntimeError('Missing existing service certificate: ' + service)
-            names = [service, service + '.sso-remediation.svc', service + '.sso-remediation.svc.cluster.local']
+            names = [service, f'{service}.{NAMESPACE}.svc', f'{service}.{NAMESPACE}.svc.cluster.local']
+            if service == 'postgres':
+                names += ['postgres-rw', 'postgres-ro', f'postgres-rw.{NAMESPACE}.svc',
+                          f'postgres-rw.{NAMESPACE}.svc.cluster.local']
             if service == 'gateway': names += ['localhost']
             if service == 'redpanda':
                 names += ['localhost']
                 for ordinal in range(3):
-                    names += [f'redpanda-{ordinal}.redpanda', f'redpanda-{ordinal}.redpanda.sso-remediation.svc.cluster.local']
+                    names += [f'redpanda-{ordinal}.redpanda', f'redpanda-{ordinal}.redpanda.{NAMESPACE}.svc.cluster.local']
             (directory / 'extensions').write_text('subjectAltName=' + ','.join('DNS:' + name for name in names) + (',IP:127.0.0.1' if service == 'gateway' else '') + '\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\nextendedKeyUsage=serverAuth\n')
             run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', directory / 'tls.key'])
             run(['openssl', 'req', '-new', '-key', directory / 'tls.key', '-subj', '/CN=' + service, '-out', directory / 'tls.csr'])
@@ -47,7 +65,7 @@ def ensure(state, values, run, *, initialize=False):
 
 
 def broker_config(index):
-    host = f'redpanda-{index}.redpanda.sso-remediation.svc.cluster.local'
+    host = f'redpanda-{index}.redpanda.{NAMESPACE}.svc.cluster.local'
     tls = {'enabled': True, 'cert_file': '/run/tls/tls.crt', 'key_file': '/run/tls/tls.key', 'truststore_file': '/run/tls/ca.crt', 'require_client_auth': False}
     # Node-only properties: centralized cluster properties belong in .bootstrap.yaml.
     return {'redpanda': {
@@ -57,7 +75,7 @@ def broker_config(index):
         'rpc_server': {'address': '0.0.0.0', 'port': 33145},
         'advertised_rpc_api': {'address': host, 'port': 33145},
         'rpc_server_tls': tls,
-        'seed_servers': [{'host': {'address': f'redpanda-{n}.redpanda.sso-remediation.svc.cluster.local', 'port': 33145}} for n in range(3)],
+        'seed_servers': [{'host': {'address': f'redpanda-{n}.redpanda.{NAMESPACE}.svc.cluster.local', 'port': 33145}} for n in range(3)],
         'kafka_api': [{'name': 'internal', 'address': '0.0.0.0', 'port': 29092, 'authentication_method': 'sasl'}],
         'advertised_kafka_api': [{'name': 'internal', 'address': host, 'port': 29092}],
         'kafka_api_tls': [{'name': 'internal', **tls}],

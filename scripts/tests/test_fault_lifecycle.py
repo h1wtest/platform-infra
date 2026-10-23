@@ -13,7 +13,7 @@ class FaultLifecycleBehavior(unittest.TestCase):
         import time
         with tempfile.TemporaryDirectory() as directory:
             state = pathlib.Path(directory)
-            with subprocess.Popen([sys.executable, '-c', 'import fcntl,sys,time; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); print("locked",flush=True); time.sleep(0.3)', str(state / 'fault.lock')], stdout=subprocess.PIPE, text=True) as child:
+            with subprocess.Popen([sys.executable, '-c', 'import fcntl,sys,time\nwith open(sys.argv[1],"a") as lock:\n fcntl.flock(lock,fcntl.LOCK_EX)\n print("locked",flush=True)\n time.sleep(0.3)', str(state / 'fault.lock')], stdout=subprocess.PIPE, text=True) as child:
                 self.assertEqual(child.stdout.readline().strip(), 'locked')
                 started = time.monotonic()
                 with exclusive(state, timeout=2):
@@ -25,7 +25,7 @@ class FaultLifecycleBehavior(unittest.TestCase):
         import time
         with tempfile.TemporaryDirectory() as directory:
             state = pathlib.Path(directory)
-            with subprocess.Popen([sys.executable, '-c', 'import fcntl,sys,time; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); print("locked",flush=True); time.sleep(2)', str(state / 'fault.lock')], stdout=subprocess.PIPE, text=True) as child:
+            with subprocess.Popen([sys.executable, '-c', 'import fcntl,sys,time\nwith open(sys.argv[1],"a") as lock:\n fcntl.flock(lock,fcntl.LOCK_EX)\n print("locked",flush=True)\n time.sleep(2)', str(state / 'fault.lock')], stdout=subprocess.PIPE, text=True) as child:
                 try:
                     self.assertEqual(child.stdout.readline().strip(), 'locked')
                     started = time.monotonic()

@@ -1,0 +1,10 @@
+{
+  "brand": {
+    "name": "Subscription Platform",
+    "logo_url": "/logo.svg",
+    "help_url": "https://example.invalid/help"
+  },
+  "locales": ["en", "ru"],
+  "default_locale": "en",
+  "canonical_origin": "https://localhost:18448"
+}

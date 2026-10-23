@@ -1,8 +1,8 @@
 # Универсальная платформа — реестр задач и порядок реализации
 
-Дата: 2026-10-24. Статус: проект на утверждение, все новые задачи OPEN.
+Дата: 2026-10-24. Статус: дизайн утверждён пользователем в архивированном контексте задачи; owner implementation выполнен, текущая фаза — интегрированная локальная приёмка и финальная evidence/status сверка, не all-DONE/publication-ready.
 Спецификация: `docs/superpowers/specs/2026-10-24-generic-subscription-platform-design.md`.
-Это план результатов/зависимостей/приёмки, не ложный отчёт о готовых функциях и не заменитель subsystem implementation plans с exact кодом. Не начинать код до утверждения дизайна. Уже существующее не переписывать: добавить недостающие правила и доказать регрессиями.
+Этот реестр сохраняет согласованный полный объём результатов/зависимостей/приёмки. Subsystem implementation plans с exact files/interfaces/test commands уже использованы; строка задачи описывает критерий, а не автоматически присвоенный PASS. Parent tracker на документационной контрольной точке сообщает23/40DONE; конкретные оставшиеся статусы и результаты обновляет integration owner по реальным checks, а не по worker reports или историческому main. Существующее не переписывать без необходимости.
 
 ## Общие условия каждой задачи
 
@@ -251,4 +251,19 @@ Depends V01/V02 и явно записанный результат V03 (PASS л
 
 ## Контроль дизайна
 
-На текущем шаге создаются только проект и этот реестр. После утверждения: exact implementation plans для owner slices (file/interface/test commands), затем implementation. Не называть документ уже выполненной разработкой и не помечать feature OPEN как DONE по одному commit документации.
+Дизайн утверждён и owner implementation уже выполнен; текущая стадия — реальная локальная приёмка, закрытие findings и финальная сверка evidence. Нельзя выдавать документацию/worker READY/старые receipts за all-DONE. Current scope: task worktrees `/home/bpqvg/dev/h1wtest-worktrees/generic-subscription-platform`, namespace `generic-subscriptions`, HTTPS18448, private `.generic-local`; оригинальный stand/PVC/owner env не изменяются. Внешний V03 остаётся OPEN без current-task NOWPayments sandbox/Telegram/public-callback prerequisites. Final source commits/images/digests/clean export ещё требуют parent freeze/reconciliation; никакого переноса старого разрешения main/push/PR/merge/deploy/cloud нет.
+
+### Текущий evidence ledger — обновляет integration owner
+
+| Контрольная область | Полученный checkpoint / оставшаяся проверка |
+|---|---|
+| Tracker |23/40DONE по сообщению parent послеC04; остальные статусы не выдумываются и не закрываются массово. |
+| Infra regression/review | Parent сообщил228tests PASS3skip48.393s и peer APPROVE; это checkpoint до финальной консолидации, не итоговый pass всех repos. |
+| Local runtime/isolation | Generic PostgreSQL Ready;3broker quorum healthy после task-only epoll recovery; actual private Docker export и namespace isolation рассмотрены отдельно. |
+| Backup/restore | Actual8DBbackup PASS44.27s; финальный restore/hash evidence и все failure/recovery matrices сверяет parent. |
+| V01/V02 | Parent сообщает actual isolation30checks PASS281.33s, causal network guard PASS35.05s, fresh-profile/email BrowserSecurity path PASS, per-pod observability6checks/all9trace services PASS17.83s с counter/histogram deltas4business owners/2Readyreplicas. Полный all8domain/UI/fault smoke ещё не объявлен; peer atomic fault guard fix и итоговая evidence сверка остаются отдельными prerequisite. |
+| V03 |OPEN: настоящие current-task provider keys/chat/public callback не подтверждены; Mailpit/fixture и история2026-10-23 не замещают внешний gate. |
+| V04/source publication | Independent findings/addressed receipts и финальные source/image/hash/clean export/history-secret checks консолидируются; final commits/remote publication не заявлены. |
+
+Подробный current/historical split — `docs/handoff.md`. Все исходные acceptance criteria выше сохранены; этот ledger не сокращает scope и не разрешает remote/cloud/production операции.
+

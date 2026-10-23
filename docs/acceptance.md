@@ -59,7 +59,7 @@ Run from `platform-infra`, after `make up`, with loopback port-forwards in separ
 ```sh
 make acceptance
 make acceptance GATE=probe
-make bootstrap-admin
+make bootstrap-owner
 make acceptance GATE=admin
 make acceptance GATE=smtp-fault
 make acceptance GATE=load
