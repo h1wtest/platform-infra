@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-24 — authorized public source publication
+
+- Published the four new business owners as public h1wtest repositories and pushed the accepted feature branches of all six existing repositories without merging their main branches. Updated all ten primary checkouts under `/home/bpqvg/dev/h1wtest`; compared696tracked files and retained existing private dotenv bytes.
+- Applied the verified workspace Docker allowlist/privacy rules in the primary directory and exercised all seven actual context-export cases. Source checkout synchronization does not migrate the retained generic stand, its owner secrets or external-provider configuration.
+- Replaced unpublished workspace source placeholders with public HTTPS repository identities and immutable published checkpoints. CI prerequisites use explicit immutable contracts/runtime revisions; actual GitHub results are tracked separately from local acceptance. NOWPayments/Telegram provider acceptance remains OPEN.
+
 ## 2026-10-24 — generic owner delivery isolation
 
 - Added explicit local generic profile in a fixed distinct namespace, with context/loopback API/namespace-UID fences, isolated owner dotenv/private state and separate access forwards. Original default namespace, retained data and CNPG operator are not migrated or modified by generic delivery.

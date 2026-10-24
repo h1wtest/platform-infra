@@ -298,7 +298,7 @@ Owner implementation и достижимая локальная приёмка �
 | V01 | LOCAL PASS | Exact commerce/race/security/fault invariants, actual owner/Kafka/isolation/traces/metrics plus nine final review corrections. |
 | V02 | LOCAL PASS with visual limit | Actual EN/RU desktop/390px four-role flows, errors/reload/outage/recovery; hidden-state tool limitation not mislabeled PASS. |
 | V03 | OPEN — external prerequisite | Current-task NOWPayments sandbox/API/IPN/public callback and genuine Telegram/private chat/public HTTPS/link/send/unlink unavailable. |
-| V04 | LOCAL review/source PASS; publication blocked | Independent full-change and focused correction reviews, RED→GREEN, redacted staged-source/full-history secret scans and local commits. No remote publication authorized. |
+| V04 | LOCAL review/source PASS; real providers OPEN | Independent full-change and focused correction reviews, RED→GREEN, redacted source/history secret scans and committed source. Owner subsequently authorized public repository pushes/current primary checkouts; existing main merges, PRs, provider setup and deployment remain outside this authorization. |
 
 ### Девять исправлений финального независимого ревью
 

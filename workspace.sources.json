@@ -1,14 +1,14 @@
 {
   "version": 1,
   "sources": [
-    {"name": "platform-infra", "url": null, "revision": null, "local": true},
-    {"name": "platform-contracts", "url": null, "revision": null, "local": true},
-    {"name": "identity-service", "url": null, "revision": null, "local": true},
-    {"name": "user-notification-service", "url": null, "revision": null, "local": true},
-    {"name": "frontend", "url": null, "revision": null, "local": true},
-    {"name": "catalog-service", "url": null, "revision": null, "local": true},
-    {"name": "billing-service", "url": null, "revision": null, "local": true},
-    {"name": "subscription-service", "url": null, "revision": null, "local": true},
-    {"name": "referral-service", "url": null, "revision": null, "local": true}
+    {"name": "platform-infra", "url": "https://github.com/h1wtest/platform-infra", "revision": "8bdff70d5b922c343b328fa5408b77618b43c3e3"},
+    {"name": "platform-contracts", "url": "https://github.com/h1wtest/platform-contracts", "revision": "bbfcf528d9376a140b496a3490bfbf5149a6b09c"},
+    {"name": "identity-service", "url": "https://github.com/h1wtest/identity-service", "revision": "007afd3513369aa66da7db6f7d09f61b0ade82b1"},
+    {"name": "user-notification-service", "url": "https://github.com/h1wtest/user-notification-service", "revision": "c4888c1b931ac53f199b95b32ca9f5eca9d77602"},
+    {"name": "frontend", "url": "https://github.com/h1wtest/frontend", "revision": "68bf94f029319ce40bc04accd8121c3a28312171"},
+    {"name": "catalog-service", "url": "https://github.com/h1wtest/catalog-service", "revision": "1f110af082ea6c4656338c94f39996a394a6324a"},
+    {"name": "billing-service", "url": "https://github.com/h1wtest/billing-service", "revision": "b1394f4f0154fe9627bc71aad5de4f87f0650e25"},
+    {"name": "subscription-service", "url": "https://github.com/h1wtest/subscription-service", "revision": "4bef5035aaf8aad7be1e01bf6ad2ae615aaff51f"},
+    {"name": "referral-service", "url": "https://github.com/h1wtest/referral-service", "revision": "0fd39645bbc7507dd1c6381caef693ea59040d0b"}
   ]
 }
