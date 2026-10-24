@@ -38,6 +38,27 @@ All eight functional domains have running implementations and exercised local AP
 
 Private evidence paths include `acceptance/final-renewal-01.json`, `acceptance/final-account-01.json`, `acceptance/final-template-browser.json`, fault/isolation/observability receipts and `backups/20261023T220133Z-2bbbfe4d/restore-verification.json`. Do not publish these private files, owner env, keys, cookies or raw provider payloads. Existing failed diagnostics are preserved; no vulnerability scanner was run or reintroduced.
 
+### Final selected-source/runtime confirmation
+
+All ten application images were selected through their independent Helm releases (460.89s). `final-runtime-provenance.json` verifies each selected image against the committed build receipt, service/contracts revision labels, Helm values and current Ready replica counts; the subsequent controller/broker-quorum/certificate-discovery check passed (15.65s). Application source hash: `377086dd4ec03636962c9157f82194161962920ee779dc826c45d1e5ff454ac3`.
+
+The selected-image commerce/security smoke passed (18.77s): ten commerce milestones, actual OIDC signature/PKCE/code-once/refresh-reuse and four cross-owner session/CSRF/authorization checks. Private receipt: `acceptance/final-selected-commerce.json`. Payments used the explicit HTTPS fixture; this does not close V03. Final browser confirmation loaded `index-JAClh0u5.js`, authenticated with existing owner MFA, exercised catalogue/admin and real escaped nonpublishing preview against restored template revision6, observed no horizontal overflow at390px, then signed out and closed its dedicated browser.
+
+An exact clean nine-owner source copy rebuilt all ten application targets with identical RootFS layers and runtime configuration to the selected committed builds; repeated bootstrap retained generated private material (18.25s, `final-copy-verification.json`). Docker cache was allowed; this is not an offline/no-cache or attestation-digest reproducibility claim. Actual Docker context export also passed the root and six backend override privacy cases (4.887s). Final infrastructure history secret scan covered17commits without leaks; later documentation-only receipts require their own final pinned manifest and scan. The operator's private `sources.final-*.json` records exact source commits including the final infrastructure documentation revision, avoiding a self-referential SHA in this file.
+
+| Source owner | Verified application/contracts revision |
+|---|---|
+| platform-contracts | `32313eaa113c54dba2e54b1e0e1f108be7c3a318` |
+| identity-service | `e1c16727496397c67c4932b0aba303c064bbfc1b` |
+| user-notification-service | `586cd5377f5a585bbfa8c54f6b46ac4fb4c9d89c` |
+| frontend | `68bf94f029319ce40bc04accd8121c3a28312171` |
+| catalog-service | `1f110af082ea6c4656338c94f39996a394a6324a` |
+| billing-service | `b1394f4f0154fe9627bc71aad5de4f87f0650e25` |
+| subscription-service | `4bef5035aaf8aad7be1e01bf6ad2ae615aaff51f` |
+| referral-service | `0fd39645bbc7507dd1c6381caef693ea59040d0b` |
+
+Local acceptance and all nine review corrections are closed. V03 remains OPEN; full provider acceptance and publication-ready remain unclaimed. Branches/worktrees and private chronological evidence are retained; no remote operations are authorized by this completion.
+
 
 Everything below is preserved **historical 2026-10-23 remediation material**. Its “current” wording, workspaces, URLs, permissions, scan outcomes, remote receipts, tests and external-provider observations apply only to that old checkpoint, not this generic implementation or its authorization.
 

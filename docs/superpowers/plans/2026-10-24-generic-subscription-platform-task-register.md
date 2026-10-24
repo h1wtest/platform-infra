@@ -1,6 +1,6 @@
 # Универсальная платформа — реестр задач и порядок реализации
 
-Дата: 2026-10-24. Статус: дизайн утверждён пользователем в архивированном контексте задачи; owner implementation выполнен, текущая фаза — интегрированная локальная приёмка и финальная evidence/status сверка, не all-DONE/publication-ready.
+Дата: 2026-10-24. Статус: утверждённый scope реализован, достижимая локальная приёмка и девять исправлений независимого ревью завершены;39/40 исходных задач LOCAL PASS, V03 OPEN. Это не all-provider-DONE и не publication-ready.
 Спецификация: `docs/superpowers/specs/2026-10-24-generic-subscription-platform-design.md`.
 Этот реестр сохраняет согласованный полный объём результатов/зависимостей/приёмки. Subsystem plans использованы; итоговый local статус и девять исправлений независимого ревью приведены в таблицах в конце. Реальные provider gates отделены от реализации и локальных fixtures; ни worker READY, ни исторический main не заменяют runtime evidence.
 
@@ -255,7 +255,7 @@ Owner implementation и достижимая локальная приёмка �
 
 ### Результаты исходных 40 задач
 
-`LOCAL PASS` означает реализацию и перечисленную локальную проверку, не настоящего внешнего провайдера. I01/V01/V02/V04 требуют также окончательного source/image/export receipt; он фиксируется в `docs/handoff.md` и private operator manifests, а не выдуманным remote SHA.
+`LOCAL PASS` означает реализацию и перечисленную локальную проверку, не настоящего внешнего провайдера. Окончательные source/image/export receipts для I01/V01/V02/V04 проверены: все10 Helm image selections, committed revision labels/Ready replicas, exact clean-copy build equivalence, выбранный commerce/security smoke и browser confirmation. Основание — `docs/handoff.md` и private operator manifests, не выдуманный remote SHA.
 
 | Задача | Статус | Проверенное основание |
 |---|---|---|
