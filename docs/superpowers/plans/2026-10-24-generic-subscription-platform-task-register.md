@@ -2,7 +2,7 @@
 
 Дата: 2026-10-24. Статус: дизайн утверждён пользователем в архивированном контексте задачи; owner implementation выполнен, текущая фаза — интегрированная локальная приёмка и финальная evidence/status сверка, не all-DONE/publication-ready.
 Спецификация: `docs/superpowers/specs/2026-10-24-generic-subscription-platform-design.md`.
-Этот реестр сохраняет согласованный полный объём результатов/зависимостей/приёмки. Subsystem implementation plans с exact files/interfaces/test commands уже использованы; строка задачи описывает критерий, а не автоматически присвоенный PASS. Parent tracker на документационной контрольной точке сообщает23/40DONE; конкретные оставшиеся статусы и результаты обновляет integration owner по реальным checks, а не по worker reports или историческому main. Существующее не переписывать без необходимости.
+Этот реестр сохраняет согласованный полный объём результатов/зависимостей/приёмки. Subsystem plans использованы; итоговый local статус и девять исправлений независимого ревью приведены в таблицах в конце. Реальные provider gates отделены от реализации и локальных fixtures; ни worker READY, ни исторический main не заменяют runtime evidence.
 
 ## Общие условия каждой задачи
 
@@ -251,19 +251,69 @@ Depends V01/V02 и явно записанный результат V03 (PASS л
 
 ## Контроль дизайна
 
-Дизайн утверждён и owner implementation уже выполнен; текущая стадия — реальная локальная приёмка, закрытие findings и финальная сверка evidence. Нельзя выдавать документацию/worker READY/старые receipts за all-DONE. Current scope: task worktrees `/home/bpqvg/dev/h1wtest-worktrees/generic-subscription-platform`, namespace `generic-subscriptions`, HTTPS18448, private `.generic-local`; оригинальный stand/PVC/owner env не изменяются. Внешний V03 остаётся OPEN без current-task NOWPayments sandbox/Telegram/public-callback prerequisites. Final source commits/images/digests/clean export ещё требуют parent freeze/reconciliation; никакого переноса старого разрешения main/push/PR/merge/deploy/cloud нет.
+Owner implementation и достижимая локальная приёмка выполнены в task worktrees `/home/bpqvg/dev/h1wtest-worktrees/generic-subscription-platform`, namespace `generic-subscriptions`, HTTPS18448, private `.generic-local`. Оригинальный stand/PVC/owner env не менялись. V03 остаётся OPEN без current-task provider credentials/chat/public callbacks; это не разрешение на remote/cloud/production операции и не publication-ready.
 
-### Текущий evidence ledger — обновляет integration owner
+### Результаты исходных 40 задач
 
-| Контрольная область | Полученный checkpoint / оставшаяся проверка |
+`LOCAL PASS` означает реализацию и перечисленную локальную проверку, не настоящего внешнего провайдера. I01/V01/V02/V04 требуют также окончательного source/image/export receipt; он фиксируется в `docs/handoff.md` и private operator manifests, а не выдуманным remote SHA.
+
+| Задача | Статус | Проверенное основание |
+|---|---|---|
+| C01 | LOCAL PASS | Строгие Go/Rust/TS codecs, nullable/omitted semantics, integer-token parity, generated endpoint/OpenAPI metadata. |
+| C02 | LOCAL PASS | Owner migration/checksum/readiness fences; runtime без DDL; real PG/Kafka race tests и owner isolation. |
+| S01 | LOCAL PASS | Реальные собственные/чужие сессии, last-active, revoke-one/others/all и актуальная authority. |
+| S02 | LOCAL PASS | Browser EN/RU: verification, reset/change, MFA enable/disable/replacement, recovery replay, real318s expiry и logout secrecy. |
+| S03 | LOCAL PASS | Browser PKCE/JWKS/refresh, third-party consent, client secret rotation/revoke; own grant revoke denies old access/refresh без logout, reconsent restores access. |
+| P01 | LOCAL PASS | Website и notification locales независимо сохраняются через reload/login; reset RU/EN actual SMTP. |
+| P02 | LOCAL PASS | Actual Overview partial-owner outage: unavailable, не fake empty/zero; остальные секции сохранены и recovery ACTIVE. |
+| P03 | LOCAL PASS | Actual INITIAL/RENEW/UPGRADE, cancel/resume, scheduled downgrade, durable reload и double-click one-order. |
+| P04 | LOCAL PASS with visual limit | Security/preferences/history/referral request/cancel/copy/logout exercised; true hidden-state browser observation unavailable, guards tested отдельно. |
+| R01 | LOCAL PASS | Real migrations/RBAC/last OWNER/concurrent demotion/version conflicts, no wildcard escalation. |
+| R02 | LOCAL PASS | Owner workload scopes/current actor/MFA/CSRF/ownership; revocation и dependency deny; no stale UI authority. |
+| R03 | LOCAL PASS | Browser OWNER assigns SUPPORT→ADMIN→ordinary and restores permission map; backend denials remain authoritative. |
+| A01 | LOCAL PASS | Browser search/ban/unban/revoke, durable same-ID command status/resume, 100 audit rows over two pages; SUPPORT broad audit403. |
+| A02 | LOCAL PASS | Editor/archive, monetary-evidence accept/reject/reverify, compensation/apply/close, partner rates and payout REJECT release. No transfer/PAID claim. |
+| A03 | LOCAL PASS | EN/RU safe variable insertion/real preview, dirty-base conflict/reload, delivery replay→SMTP Sent, quarantine409 retained and reasoned reset. |
+| C03 | LOCAL PASS | Immutable publish/archive/historical snapshots, concurrent direct writers, bounded pagination and exact offers. |
+| C04 | LOCAL PASS | Owner editor→ordinary buyer2.000001→FULFILLED; archive/draft absent publicly, retained paid access. |
+| B01 | LOCAL PASS | Scoped idempotency, persisted attempt/prepare/commission quote, no browser price authority. |
+| B02 | LOCAL PASS; real provider OPEN | Actual HTTPS fixture/HMAC intake, exact IDs/decimals, ambiguous-create recovery and strict wire; no NOWPayments sandbox claim. |
+| B03 | LOCAL PASS | Independent status evidence, underpayment review, monetary facts preserved, explicit reason/versioned manual decisions. |
+| B04 | LOCAL PASS | Actual Kafka accepted→subscription→reply→FULFILLED; owner outage recovery and delayed natural-expiry immutable outcome. |
+| U01 | LOCAL PASS | Database-time entitlement boundary, user/product isolation, close denies and persistent history. |
+| U02 | LOCAL PASS | Exact ceil proration, frozen quote/deadline/version/hash, STARTED fences and strict prepare wire. |
+| U03 | LOCAL PASS | Duplicate payment once, renewal anchored to old end, cancel/resume/expiry and real delayed recovery. |
+| U04 | LOCAL PASS | Paid immediate upgrade same end; scheduled/prepaid next-period boundary, no free unpaid period. |
+| U05 | LOCAL PASS | Frozen compensation recipients/versions, conflict/repeat protection, real one-day apply and close. |
+| F01 | LOCAL PASS | Random own code, registration claim/finalization/backfill, occurrence deadline and immutable referrer. |
+| F02 | LOCAL PASS | Global/partner rate history, quote frozen before provider start, exact rate precedence. |
+| F03 | LOCAL PASS | Fulfilled-only floor commission, duplicate once, balance/debt/reversal invariants and real two-payment recovery. |
+| F04 | LOCAL PASS | Whole-balance reservation, own cancel, manual REJECT release once, immutable network/address/amount; no actual transfer. |
+| N01 | LOCAL PASS | Independent notification locale, typed EN/RU templates, mandatory transactional flow and immutable retry snapshots. |
+| N02 | LOCAL protocol PASS; real bot OPEN | Real PG/TLS HTTP two-site candidate/confirm/unlink/token replay/binding-version tests; missing bot is unavailable, not linked. |
+| N03 | LOCAL delivery PASS; real Telegram OPEN | Actual Kafka/SMTP, role/preference/binding policy regressions, retry/replay/SMTP outage recovery and portable MIME. |
+| N04 | LOCAL ingress PASS; trading provider OPEN | Real signed HTTP→Kafka→readiness SMTP, sender/scope/nonce/event/user/subscription denials; Telegram-only trading send not claimed. |
+| I01 | LOCAL runtime PASS | Independent Helm/DB/migration/TLS/ACL/network/backup/restore, per-pod discovery/traces/metrics and actual alert recovery. |
+| I02 | LOCAL source PASS | Nine clean committed source owners, explicit local pinned resolve/checkout, repeated private bootstrap and no secret/build artifact export. |
+| V01 | LOCAL PASS | Exact commerce/race/security/fault invariants, actual owner/Kafka/isolation/traces/metrics plus nine final review corrections. |
+| V02 | LOCAL PASS with visual limit | Actual EN/RU desktop/390px four-role flows, errors/reload/outage/recovery; hidden-state tool limitation not mislabeled PASS. |
+| V03 | OPEN — external prerequisite | Current-task NOWPayments sandbox/API/IPN/public callback and genuine Telegram/private chat/public HTTPS/link/send/unlink unavailable. |
+| V04 | LOCAL review/source PASS; publication blocked | Independent full-change and focused correction reviews, RED→GREEN, redacted staged-source/full-history secret scans and local commits. No remote publication authorized. |
+
+### Девять исправлений финального независимого ревью
+
+| Finding | Результат и фактическая проверка |
 |---|---|
-| Tracker |23/40DONE по сообщению parent послеC04; остальные статусы не выдумываются и не закрываются массово. |
-| Infra regression/review | Parent сообщил228tests PASS3skip48.393s и peer APPROVE; это checkpoint до финальной консолидации, не итоговый pass всех repos. |
-| Local runtime/isolation | Generic PostgreSQL Ready;3broker quorum healthy после task-only epoll recovery; actual private Docker export и namespace isolation рассмотрены отдельно. |
-| Backup/restore | Actual8DBbackup PASS44.27s; финальный restore/hash evidence и все failure/recovery matrices сверяет parent. |
-| V01/V02 | Parent сообщает actual isolation30checks PASS281.33s, causal network guard PASS35.05s, fresh-profile/email BrowserSecurity path PASS, per-pod observability6checks/all9trace services PASS17.83s с counter/histogram deltas4business owners/2Readyreplicas. Полный all8domain/UI/fault smoke ещё не объявлен; peer atomic fault guard fix и итоговая evidence сверка остаются отдельными prerequisite. |
-| V03 |OPEN: настоящие current-task provider keys/chat/public callback не подтверждены; Mailpit/fixture и история2026-10-23 не замещают внешний gate. |
-| V04/source publication | Independent findings/addressed receipts и финальные source/image/hash/clean export/history-secret checks консолидируются; final commits/remote publication не заявлены. |
+| C-01 | Immutable subscription outcome corroborates only the exact delayed RENEW exception; actual real100s expiry/Kafka outage recovery PASS133.82s, period/commission replay stable. |
+| C-02 | Generated producer/consumer prepare DTO omits absent optional fields and rejects null/unknown; initial/renewal actual HTTP and PG regressions passed. |
+| I-01 | Original actor/current stored-action permission/fresh MFA recover SUPPORT command, without audit:read; actual status/resume/same-key and foreign403 passed. |
+| I-02 | Real forgot-password uses profile notification locale; RU/EN reverse website locale with optional emails disabled passed actual SMTP. |
+| I-03 | RFC2047 Subject plus quoted-printable UTF-8 body; strict seven-bit real SMTP socket MIME decode and Mailpit business path passed. |
+| S-01 | Dirty draft/base remain one snapshot; actual remote revision5 versus base4 gave409, retained edits, explicit reload and exact restore6. |
+| S-02 | Fraction/exponent tokens rejected before rounding across Go/Rust/TS; integer extrema remain exact. |
+| S-03 | Canonical cookie sso_session, explicit actual success statuses and anonymous catalogue security verified in parsed generated OpenAPI. |
+| S-04 | Authority-listed variable insertion and real nonpublishing escaped preview exercised in browser; unknown400 and inert markup confirmed. |
 
-Подробный current/historical split — `docs/handoff.md`. Все исходные acceptance criteria выше сохранены; этот ledger не сокращает scope и не разрешает remote/cloud/production операции.
+Detailed execution counts, durations, source/provenance boundaries and private receipt filenames are in `docs/handoff.md`; historical2026-10-23 observations remain explicitly separate. No cloud/production/HA/certification or real-provider success is implied.
+
 

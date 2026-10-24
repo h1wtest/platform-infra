@@ -1,6 +1,22 @@
-# Local remediation acceptance
+# Local platform acceptance
 
-Current policy: image/dependency vulnerability scanners are removed by explicit owner instruction and must not run. Their historical results below remain history, not current acceptance gates. Local business behavior, secrets, RBAC/TLS, configuration/schema validation, builds and tests remain required. Host automatic recovery/external hosting remain excluded. Genuine Telegram linking and login-alert delivery subsequently passed; evidence below supersedes historical missing-credential notes.
+## Generic platform — 2026-10-24 local evidence
+
+Current scope is the isolated `generic-subscriptions` namespace at `https://localhost:18448`, not the retained original stand. The implementation covers all eight domains; authoritative per-task local results and explicit external gates are in `docs/superpowers/plans/2026-10-24-generic-subscription-platform-task-register.md`, with counts/durations and source boundaries in `docs/handoff.md`.
+
+Executed paths include real owner DB/Kafka/API commerce and security, EN/RU desktop/390px four-role browser flows, immutable catalogue and payment evidence, delayed-renewal recovery, referral reservation/rejection, localized transactional SMTP, safe template preview/concurrency, scoped quarantine/replay, independent Helm/TLS/ACL/network isolation, eight-owner backup/restore hashes, per-pod metrics/traces and actual alert restoration. Failed first attempts remain private chronological evidence rather than being relabeled successful.
+
+The final independent review's nine findings were corrected with observed RED/GREEN regressions and real local smoke. In particular, a real100-second natural expiry while brokers were down recovered through an immutable N+2 outcome to FULFILLED; reset mail honored RU/EN notification preferences independently of website language; SUPPORT recovered its own same-ID command without broad audit access; stale template publication returned409 and exact original locales were restored.
+
+**OPEN external provider gate:** current-task NOWPayments sandbox/API/signed public callback and genuine Telegram bot/private-chat/public-HTTPS link/unlink/send remain unavailable. HTTPS payment fixtures, Mailpit and local TLS protocol tests do not certify these providers. Trading send remains Telegram-only; no real money transfer, cloud/production deployment, independent-host HA or OIDC certification is claimed.
+
+**Browser limit:** available Chrome/CDP controls did not expose a true hidden document/window state. Visibility guards and tests are separate from actual visible-idle/no-polling observation; no synthetic hidden-state acceptance is claimed.
+
+Image/dependency vulnerability scanning remains disabled by explicit owner instruction. Redacted secret/history checks, TLS/RBAC/schema validation, builds and meaningful behavioral verification remain required. Private credentials/evidence stay ignored under `.generic-local` and are not release artifacts.
+
+## Historical 2026-10-23 remediation evidence
+
+Everything below applies to the earlier default-profile remediation checkpoint. Its provider observations, scans, URLs, counts and integration permissions do not close the generic platform's current gates or authorize publication/deployment.
 
 After scanner deletion,85 remaining Python tests passed6.267s (one opt-in broker test skipped); removed six scanner-only tests are not counted as passing tests. Five changed workflows passed actionlint and YAML parsing. Real schema validation, running-stand check and login/profile/logout smoke passed without vulnerability scanning. Secret/configuration checks and all existing security patches remain active.
 
